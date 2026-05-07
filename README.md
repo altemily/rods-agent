@@ -16,15 +16,16 @@ Implementado:
 - Resumo final template-based após a calibração.
 - Classificação textual com Gemini para despesas, rendas e contribuições em caixinhas.
 - Validação da resposta estruturada da IA com Zod.
+- Registro de movimentações financeiras válidas no Notion.
 
 Ainda não implementado:
 
-- Persistência no Notion.
-- Registro permanente de despesas, entradas e caixinhas.
+- Persistência do onboarding no Notion.
 - Imagem, cupom, OCR ou multimodalidade.
 - Roast contextual completo baseado em IA.
+- Outras databases além de movimentações.
 
-Nesta branch, as classificações são apenas prévias e ainda não são registradas no Notion.
+Nesta branch, apenas movimentações textuais válidas são registradas no Notion. O onboarding continua em memória.
 
 ## Requisitos
 
@@ -51,6 +52,15 @@ GEMINI_MODEL=gemini-2.5-flash
 ```
 
 Se `GEMINI_API_KEY` não estiver configurada, o bot continua funcionando, mas avisa que a classificação por IA ainda não está ativa.
+
+Para habilitar o registro de movimentações no Notion, configure:
+
+```text
+NOTION_TOKEN=
+NOTION_MOVEMENTS_DATABASE_ID=
+```
+
+Se o Notion não estiver configurado ou falhar, o bot informa que a classificação funcionou, mas o registro não foi concluído.
 
 ## Rodando localmente
 
@@ -95,4 +105,15 @@ O RODS tenta identificar:
 - contribuição para caixinha, reserva, investimento ou meta
 - mensagem sem intenção financeira clara
 
-Quando a classificação é válida, o bot mostra uma prévia com tipo, valor, descrição, categoria e nível de necessidade. O status sempre informa que ainda não foi registrado no Notion.
+Quando a classificação é válida, o bot mostra uma prévia com tipo, valor, descrição, categoria e nível de necessidade.
+
+## Registro no Notion
+
+O RODS registra no Notion apenas quando a classificação textual atende todos os critérios:
+
+- `intent` diferente de `UNKNOWN`
+- `confidence >= 0.7`
+- `needsConfirmation === false`
+- `amount` informado
+
+As páginas são criadas na database configurada em `NOTION_MOVEMENTS_DATABASE_ID`, usando a origem `TEXT` e status `Registrado`.
