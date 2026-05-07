@@ -1,11 +1,19 @@
 import { FinancialTextClassifier } from "./financialTextClassifier";
 import { OnboardingAgent } from "./onboardingAgent";
+import { NotionService, notionService as defaultNotionService } from "../services/notion.service";
 import type { FinancialTextClassification } from "./schemas";
+
+type PersistableFinancialClassification = FinancialTextClassification & {
+  intent: "REGISTER_EXPENSE" | "REGISTER_INCOME" | "REGISTER_BOX_CONTRIBUTION";
+  amount: number;
+  needsConfirmation: false;
+};
 
 export class RodsAgent {
   constructor(
     private readonly onboardingAgent = new OnboardingAgent(),
     private readonly financialTextClassifier = new FinancialTextClassifier(),
+    private readonly notionService: NotionService = defaultNotionService,
   ) {}
 
   async respond(chatId: string | number, message: string): Promise<string> {
@@ -42,10 +50,36 @@ export class RodsAgent {
       return result.message;
     }
 
-    return this.formatClassificationPreview(result.classification);
+    if (!this.isPersistableClassification(result.classification)) {
+      return this.formatClassificationPreview(result.classification, false);
+    }
+
+    const notionResult = await this.notionService.createMovement({
+      telegramUserId: chatId,
+      intent: result.classification.intent,
+      amount: result.classification.amount,
+      description: result.classification.description,
+      category: result.classification.category,
+      necessityLevel: result.classification.necessityLevel,
+      boxName: result.classification.boxName,
+      source: "TEXT",
+    });
+
+    return this.formatClassificationPreview(result.classification, notionResult.success);
   }
 
-  private formatClassificationPreview(classification: FinancialTextClassification): string {
+  private isPersistableClassification(
+    classification: FinancialTextClassification,
+  ): classification is PersistableFinancialClassification {
+    return (
+      classification.intent !== "UNKNOWN" &&
+      classification.confidence >= 0.7 &&
+      classification.needsConfirmation === false &&
+      classification.amount !== null
+    );
+  }
+
+  private formatClassificationPreview(classification: FinancialTextClassification, notionSaved: boolean): string {
     return [
       "Classificação prévia do RODS:",
       `Tipo: ${this.formatIntent(classification.intent)}`,
@@ -53,7 +87,9 @@ export class RodsAgent {
       `Descrição: ${classification.description ?? "não informada"}`,
       `Categoria: ${classification.category ?? "não informada"}`,
       `Nível: ${this.formatNecessityLevel(classification.necessityLevel)}`,
-      "Status: ainda não registrado no Notion.",
+      notionSaved
+        ? "Status: registrado no Notion."
+        : "Status: classificação feita, mas o registro no Notion não foi concluído.",
     ].join("\n");
   }
 
