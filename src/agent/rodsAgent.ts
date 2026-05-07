@@ -1,11 +1,24 @@
-import type { AgentResponse } from "./schemas";
+import { OnboardingAgent } from "./onboardingAgent";
 
 export class RodsAgent {
-  async respond(_message: string): Promise<AgentResponse> {
-    return {
-      message: "RODS online. Agora vamos calibrar seu radar financeiro.",
-      intent: "unknown",
-      confidence: 0,
-    };
+  constructor(private readonly onboardingAgent = new OnboardingAgent()) {}
+
+  respond(chatId: string | number, message: string): string {
+    const normalizedMessage = message.trim();
+    const command = normalizedMessage.toLowerCase();
+
+    if (command === "/start") {
+      return this.onboardingAgent.start(chatId);
+    }
+
+    if (command === "/reset") {
+      return this.onboardingAgent.reset(chatId);
+    }
+
+    if (command === "/status") {
+      return this.onboardingAgent.getStatus(chatId);
+    }
+
+    return this.onboardingAgent.handleMessage(chatId, normalizedMessage);
   }
 }
