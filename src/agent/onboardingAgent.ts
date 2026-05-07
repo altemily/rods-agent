@@ -122,6 +122,10 @@ function createInitialState(chatId: ChatId): Onboarding {
 }
 
 export class OnboardingAgent {
+  isCompleted(chatId: ChatId): boolean {
+    return onboardingStates.get(normalizeChatId(chatId))?.status === "ONBOARDING_COMPLETED";
+  }
+
   start(chatId: ChatId): string {
     const existingState = onboardingStates.get(normalizeChatId(chatId));
 

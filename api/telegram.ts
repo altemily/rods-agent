@@ -43,10 +43,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true, ignored: true });
   }
 
-  const telegramService = new TelegramService();
-  const responseMessage = rodsAgent.respond(chatId, text);
+  try {
+    const telegramService = new TelegramService();
+    const responseMessage = await rodsAgent.respond(chatId, text);
 
-  await telegramService.sendMessage(chatId, responseMessage);
+    await telegramService.sendMessage(chatId, responseMessage);
+  } catch {
+    return res.status(200).json({
+      ok: false,
+      handled: true,
+      error: "Failed to process Telegram update",
+    });
+  }
 
   return res.status(200).json({
     ok: true,
