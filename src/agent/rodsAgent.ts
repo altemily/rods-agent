@@ -1,6 +1,7 @@
 import { FinancialTextClassifier } from "./financialTextClassifier";
 import { OnboardingAgent } from "./onboardingAgent";
 import { NotionService, notionService as defaultNotionService } from "../services/notion.service";
+import { ContextualRoastGenerator } from "./contextualRoastGenerator";
 import type { FinancialTextClassification } from "./schemas";
 
 type PersistableFinancialClassification = FinancialTextClassification & {
@@ -14,6 +15,7 @@ export class RodsAgent {
     private readonly onboardingAgent = new OnboardingAgent(),
     private readonly financialTextClassifier = new FinancialTextClassifier(),
     private readonly notionService: NotionService = defaultNotionService,
+    private readonly contextualRoastGenerator = new ContextualRoastGenerator(),
   ) {}
 
   async respond(chatId: string | number, message: string): Promise<string> {
@@ -65,7 +67,19 @@ export class RodsAgent {
       source: "TEXT",
     });
 
-    return this.formatClassificationPreview(result.classification, notionResult.success);
+    const profile = this.onboardingAgent.getCompletedProfile(chatId);
+
+    if (!profile) {
+      return this.formatClassificationPreview(result.classification, notionResult.success);
+    }
+
+    const contextualRoast = await this.contextualRoastGenerator.generate({
+      profile,
+      classification: result.classification,
+      notionSaved: notionResult.success,
+    });
+
+    return this.formatFinalResponse(result.classification, notionResult.success, contextualRoast.roast);
   }
 
   private isPersistableClassification(
@@ -90,6 +104,26 @@ export class RodsAgent {
       notionSaved
         ? "Status: registrado no Notion."
         : "Status: classificação feita, mas o registro no Notion não foi concluído.",
+    ].join("\n");
+  }
+
+  private formatFinalResponse(
+    classification: PersistableFinancialClassification,
+    notionSaved: boolean,
+    roast: string,
+  ): string {
+    return [
+      notionSaved
+        ? "Movimentação registrada no Notion."
+        : "Movimentação classificada, mas o registro no Notion não foi concluído.",
+      "",
+      `Tipo: ${this.formatIntent(classification.intent)}`,
+      `Valor: ${this.formatAmount(classification.amount)}`,
+      `Categoria: ${classification.category ?? "não informada"}`,
+      `Nível: ${this.formatNecessityLevel(classification.necessityLevel)}`,
+      "",
+      "RODS:",
+      roast,
     ].join("\n");
   }
 
