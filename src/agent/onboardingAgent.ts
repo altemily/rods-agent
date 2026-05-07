@@ -1,4 +1,4 @@
-import type { Onboarding, OnboardingStep } from "./schemas";
+import type { CompletedOnboardingProfile, Onboarding, OnboardingStep } from "./schemas";
 
 type ChatId = string | number;
 
@@ -121,9 +121,40 @@ function createInitialState(chatId: ChatId): Onboarding {
   };
 }
 
+function answerFor(state: Onboarding, step: OnboardingQuestion["step"]): string {
+  return state.answers[step] ?? "não informado";
+}
+
 export class OnboardingAgent {
   isCompleted(chatId: ChatId): boolean {
     return onboardingStates.get(normalizeChatId(chatId))?.status === "ONBOARDING_COMPLETED";
+  }
+
+  getCompletedProfile(chatId: ChatId): CompletedOnboardingProfile | null {
+    const state = onboardingStates.get(normalizeChatId(chatId));
+
+    if (!state || state.status !== "ONBOARDING_COMPLETED") {
+      return null;
+    }
+
+    return {
+      userId: state.userId,
+      chatId: state.chatId,
+      monthlyIncome: answerFor(state, "monthlyIncome"),
+      incomeFrequency: answerFor(state, "incomeFrequency"),
+      fixedExpenses: answerFor(state, "fixedExpenses"),
+      debts: answerFor(state, "debts"),
+      mainGoal: answerFor(state, "mainGoal"),
+      goalAmount: answerFor(state, "goalAmount"),
+      goalDeadline: answerFor(state, "goalDeadline"),
+      weeklyRoutine: answerFor(state, "weeklyRoutine"),
+      spendingTriggers: answerFor(state, "spendingTriggers"),
+      riskCategories: answerFor(state, "riskCategories"),
+      boxesAndInvestments: answerFor(state, "boxesAndInvestments"),
+      roastLevel: answerFor(state, "roastLevel"),
+      sensitiveLimits: answerFor(state, "sensitiveLimits"),
+      completedAt: state.completedAt,
+    };
   }
 
   start(chatId: ChatId): string {
@@ -172,7 +203,7 @@ export class OnboardingAgent {
     }
 
     if (state.status === "ONBOARDING_COMPLETED") {
-      return "Sua calibração inicial já está concluída. Nesta branch eu ainda não analiso gastos de verdade; use /reset se quiser refazer o onboarding.";
+      return "Sua calibração inicial já está concluída. Agora mande uma movimentação financeira para eu classificar, registrar e comentar com contexto.";
     }
 
     const currentQuestion = getQuestion(state.currentStep);
@@ -199,27 +230,25 @@ export class OnboardingAgent {
   }
 
   private buildSummary(state: Onboarding): string {
-    const answerFor = (step: OnboardingQuestion["step"]) => state.answers[step] ?? "não informado";
-
     return [
       "Calibração concluída. Status: ONBOARDING_COMPLETED.",
       "",
       "Resumo financeiro e comportamental inicial:",
-      `- Renda mensal: ${answerFor("monthlyIncome")}`,
-      `- Frequência de recebimento: ${answerFor("incomeFrequency")}`,
-      `- Despesas fixas: ${answerFor("fixedExpenses")}`,
-      `- Dívidas: ${answerFor("debts")}`,
-      `- Meta principal: ${answerFor("mainGoal")}`,
-      `- Valor da meta: ${answerFor("goalAmount")}`,
-      `- Prazo da meta: ${answerFor("goalDeadline")}`,
-      `- Rotina semanal: ${answerFor("weeklyRoutine")}`,
-      `- Gatilhos de consumo: ${answerFor("spendingTriggers")}`,
-      `- Categorias de risco: ${answerFor("riskCategories")}`,
-      `- Caixinhas/investimentos: ${answerFor("boxesAndInvestments")}`,
-      `- Nível de roast: ${answerFor("roastLevel")}`,
-      `- Limites sensíveis: ${answerFor("sensitiveLimits")}`,
+      `- Renda mensal: ${answerFor(state, "monthlyIncome")}`,
+      `- Frequência de recebimento: ${answerFor(state, "incomeFrequency")}`,
+      `- Despesas fixas: ${answerFor(state, "fixedExpenses")}`,
+      `- Dívidas: ${answerFor(state, "debts")}`,
+      `- Meta principal: ${answerFor(state, "mainGoal")}`,
+      `- Valor da meta: ${answerFor(state, "goalAmount")}`,
+      `- Prazo da meta: ${answerFor(state, "goalDeadline")}`,
+      `- Rotina semanal: ${answerFor(state, "weeklyRoutine")}`,
+      `- Gatilhos de consumo: ${answerFor(state, "spendingTriggers")}`,
+      `- Categorias de risco: ${answerFor(state, "riskCategories")}`,
+      `- Caixinhas/investimentos: ${answerFor(state, "boxesAndInvestments")}`,
+      `- Nível de roast: ${answerFor(state, "roastLevel")}`,
+      `- Limites sensíveis: ${answerFor(state, "sensitiveLimits")}`,
       "",
-      "Por enquanto eu só montei seu mapa inicial. A parte de analisar gastos de verdade vem depois - sem contexto, até boleto vira personagem.",
+      "Agora mande uma movimentação financeira para eu classificar, registrar no Notion e comentar com contexto.",
     ].join("\n");
   }
 }

@@ -63,6 +63,31 @@ export const financialTextClassificationSchema = z.object({
   clarificationQuestion: z.string().nullable(),
 });
 
+export const completedOnboardingProfileSchema = z.object({
+  userId: z.string(),
+  chatId: z.union([z.string(), z.number()]),
+  monthlyIncome: z.string(),
+  incomeFrequency: z.string(),
+  fixedExpenses: z.string(),
+  debts: z.string(),
+  mainGoal: z.string(),
+  goalAmount: z.string(),
+  goalDeadline: z.string(),
+  weeklyRoutine: z.string(),
+  spendingTriggers: z.string(),
+  riskCategories: z.string(),
+  boxesAndInvestments: z.string(),
+  roastLevel: z.string(),
+  sensitiveLimits: z.string(),
+  completedAt: z.string().datetime().optional(),
+});
+
+export const contextualRoastSchema = z.object({
+  roast: z.string().trim().min(1),
+  tone: z.enum(["LIGHT", "DIRECT", "CONTROLLED", "NO_ANESTHESIA"]),
+  safetyNotes: z.string().trim().min(1).nullable(),
+});
+
 export type User = z.infer<typeof userSchema>;
 export type Onboarding = z.infer<typeof onboardingSchema>;
 export type OnboardingStatus = Onboarding["status"];
@@ -70,3 +95,5 @@ export type OnboardingStep = Onboarding["currentStep"];
 export type FinancialMovement = z.infer<typeof financialMovementSchema>;
 export type AgentResponse = z.infer<typeof agentResponseSchema>;
 export type FinancialTextClassification = z.infer<typeof financialTextClassificationSchema>;
+export type CompletedOnboardingProfile = z.infer<typeof completedOnboardingProfileSchema>;
+export type ContextualRoast = z.infer<typeof contextualRoastSchema>;

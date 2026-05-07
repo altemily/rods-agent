@@ -17,13 +17,15 @@ Implementado:
 - Classificação textual com Gemini para despesas, rendas e contribuições em caixinhas.
 - Validação da resposta estruturada da IA com Zod.
 - Registro de movimentações financeiras válidas no Notion.
+- Roast contextual com Gemini usando o perfil do onboarding, classificação financeira e status do Notion.
+- Fallback template-based para o roast quando a IA não estiver configurada, falhar ou retornar JSON inválido.
 
 Ainda não implementado:
 
 - Persistência do onboarding no Notion.
 - Imagem, cupom, OCR ou multimodalidade.
-- Roast contextual completo baseado em IA.
 - Outras databases além de movimentações.
+- Histórico financeiro avançado ou RAG real.
 
 Nesta branch, apenas movimentações textuais válidas são registradas no Notion. O onboarding continua em memória.
 
@@ -105,7 +107,7 @@ O RODS tenta identificar:
 - contribuição para caixinha, reserva, investimento ou meta
 - mensagem sem intenção financeira clara
 
-Quando a classificação é válida, o bot mostra uma prévia com tipo, valor, descrição, categoria e nível de necessidade.
+Quando a classificação é válida, o bot mostra tipo, valor, categoria e nível de necessidade. Se a movimentação atender aos critérios de registro, o RODS também tenta registrar no Notion e complementa a resposta com um roast contextual seguro.
 
 ## Registro no Notion
 
@@ -117,3 +119,40 @@ O RODS registra no Notion apenas quando a classificação textual atende todos o
 - `amount` informado
 
 As páginas são criadas na database configurada em `NOTION_MOVEMENTS_DATABASE_ID`, usando a origem `TEXT` e status `Registrado`.
+
+## Roast Contextual
+
+Depois do onboarding concluído e de uma classificação válida, o RODS gera um comentário contextual considerando:
+
+- perfil coletado no onboarding;
+- renda, frequência de recebimento, despesas fixas e dívidas;
+- meta principal, valor e prazo;
+- rotina semanal, gatilhos de consumo e categorias de risco;
+- caixinhas/investimentos;
+- nível de roast permitido e limites sensíveis;
+- classificação da movimentação;
+- status do registro no Notion.
+
+O roast só é gerado quando:
+
+- onboarding está concluído;
+- `intent !== UNKNOWN`;
+- `confidence >= 0.7`;
+- `needsConfirmation === false`;
+- `amount !== null`.
+
+A resposta final mantém uma estrutura previsível:
+
+```text
+Movimentação registrada no Notion.
+
+Tipo: despesa
+Valor: R$ 42,90
+Categoria: alimentação
+Nível: opcional
+
+RODS:
+...
+```
+
+O Gemini deve retornar JSON validado com Zod. Se `GEMINI_API_KEY` estiver ausente, a chamada falhar, a resposta vier vazia ou o JSON não bater com o schema esperado, o RODS usa um fallback local baseado em templates.
