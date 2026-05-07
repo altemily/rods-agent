@@ -4,7 +4,7 @@
   "description": "Sistema agentic de responsabilização financeira com análise contextual, sarcasmo e feedback comportamental.",
   "main": "index.js",
   "scripts": {
-    "dev": "vercel dev",
+    "vercel:dev": "vercel dev",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck"
   },

@@ -9,9 +9,29 @@ export const userSchema = z.object({
 
 export const onboardingSchema = z.object({
   userId: z.string(),
-  step: z.enum(["profile", "income", "goals", "completed"]),
-  isCompleted: z.boolean(),
-  answers: z.record(z.string(), z.unknown()).default({}),
+  chatId: z.union([z.string(), z.number()]),
+  status: z.enum(["NOT_STARTED", "ONBOARDING_IN_PROGRESS", "ONBOARDING_COMPLETED"]),
+  currentStep: z
+    .enum([
+      "monthlyIncome",
+      "incomeFrequency",
+      "fixedExpenses",
+      "debts",
+      "mainGoal",
+      "goalAmount",
+      "goalDeadline",
+      "weeklyRoutine",
+      "spendingTriggers",
+      "riskCategories",
+      "boxesAndInvestments",
+      "roastLevel",
+      "sensitiveLimits",
+      "completed",
+    ])
+    .default("monthlyIncome"),
+  answers: z.record(z.string(), z.string()).default({}),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
 });
 
 export const financialMovementSchema = z.object({
@@ -33,5 +53,7 @@ export const agentResponseSchema = z.object({
 
 export type User = z.infer<typeof userSchema>;
 export type Onboarding = z.infer<typeof onboardingSchema>;
+export type OnboardingStatus = Onboarding["status"];
+export type OnboardingStep = Onboarding["currentStep"];
 export type FinancialMovement = z.infer<typeof financialMovementSchema>;
 export type AgentResponse = z.infer<typeof agentResponseSchema>;

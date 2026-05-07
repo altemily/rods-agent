@@ -1,3 +1,4 @@
+import { RodsAgent } from "../src/agent/rodsAgent";
 import { TelegramService } from "../src/services/telegram.service";
 
 type VercelRequest = {
@@ -20,7 +21,7 @@ type TelegramUpdate = {
   };
 };
 
-const ONLINE_MESSAGE = "RODS online. Agora vamos calibrar seu radar financeiro.";
+const rodsAgent = new RodsAgent();
 
 function parseTelegramUpdate(body: unknown): { chatId: string | number | undefined; text: string } {
   const update = body as TelegramUpdate;
@@ -43,8 +44,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const telegramService = new TelegramService();
+  const responseMessage = rodsAgent.respond(chatId, text);
 
-  await telegramService.sendMessage(chatId, ONLINE_MESSAGE);
+  await telegramService.sendMessage(chatId, responseMessage);
 
   return res.status(200).json({
     ok: true,
