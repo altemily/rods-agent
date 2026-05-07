@@ -1,0 +1,35 @@
+{
+  "name": "rods-agent",
+  "version": "1.0.0",
+  "description": "Sistema agentic de responsabilização financeira com análise contextual, sarcasmo e feedback comportamental.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/altemily/rods-agent.git"
+  },
+  "keywords": [],
+  "author": "Ariane Carvalho",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/altemily/rods-agent/issues"
+  },
+  "homepage": "https://github.com/altemily/rods-agent#readme",
+  "dependencies": {
+    "@google/genai": "^1.52.0",
+    "@notionhq/client": "^5.20.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vercel": "^53.2.0"
+  }
+}
