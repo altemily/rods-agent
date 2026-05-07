@@ -51,9 +51,22 @@ export const agentResponseSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+export const financialTextClassificationSchema = z.object({
+  intent: z.enum(["REGISTER_EXPENSE", "REGISTER_INCOME", "REGISTER_BOX_CONTRIBUTION", "UNKNOWN"]),
+  amount: z.number().nullable(),
+  description: z.string().nullable(),
+  category: z.string().nullable(),
+  necessityLevel: z.enum(["ESSENTIAL", "NECESSARY", "OPTIONAL", "IMPULSIVE"]).nullable(),
+  boxName: z.string().nullable(),
+  confidence: z.number().min(0).max(1),
+  needsConfirmation: z.boolean(),
+  clarificationQuestion: z.string().nullable(),
+});
+
 export type User = z.infer<typeof userSchema>;
 export type Onboarding = z.infer<typeof onboardingSchema>;
 export type OnboardingStatus = Onboarding["status"];
 export type OnboardingStep = Onboarding["currentStep"];
 export type FinancialMovement = z.infer<typeof financialMovementSchema>;
 export type AgentResponse = z.infer<typeof agentResponseSchema>;
+export type FinancialTextClassification = z.infer<typeof financialTextClassificationSchema>;
