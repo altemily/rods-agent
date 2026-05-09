@@ -19,6 +19,63 @@ type ClassificationResult =
     };
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
+const RAW_RESPONSE_PREVIEW_LENGTH = 120;
+
+type ClassifierLogStage =
+  | "gemini-empty-response"
+  | "json-extraction"
+  | "json-parse"
+  | "zod-validation"
+  | "classifier";
+
+function serializeError(error: unknown): { name: string; message: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+
+  return {
+    name: "UnknownError",
+    message: String(error),
+  };
+}
+
+function looksSensitive(text: string): boolean {
+  const normalized = text.toLowerCase();
+
+  return (
+    /\b(api[_-]?key|token|secret|password|authorization|bearer|x-goog|telegram|notion|gemini)\b/i.test(normalized) ||
+    /\b[A-Za-z0-9_-]{32,}\b/.test(text) ||
+    /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(text)
+  );
+}
+
+function buildSafeRawResponsePreview(rawText: string): string | undefined {
+  if (!rawText || looksSensitive(rawText)) {
+    return undefined;
+  }
+
+  return rawText.replace(/\s+/g, " ").trim().slice(0, RAW_RESPONSE_PREVIEW_LENGTH);
+}
+
+function logClassifierFailure(input: {
+  stage: ClassifierLogStage;
+  error: unknown;
+  model: string;
+  hasApiKey: boolean;
+  rawResponse?: string;
+}): void {
+  console.error("[RODS][Classifier]", {
+    stage: input.stage,
+    model: input.model,
+    hasApiKey: input.hasApiKey,
+    error: serializeError(input.error),
+    rawResponseLength: input.rawResponse?.length,
+    rawResponsePreview: input.rawResponse ? buildSafeRawResponsePreview(input.rawResponse) : undefined,
+  });
+}
 
 function buildPrompt(message: string): string {
   return [
@@ -72,17 +129,56 @@ function extractJson(rawText: string): string | null {
   return trimmed.slice(firstBrace, lastBrace + 1);
 }
 
-function parseClassification(rawText: string): FinancialTextClassification | null {
+function parseClassification(rawText: string, diagnostics: { model: string; hasApiKey: boolean }): FinancialTextClassification | null {
+  if (!rawText.trim()) {
+    logClassifierFailure({
+      stage: "gemini-empty-response",
+      error: new Error("Gemini returned an empty response"),
+      ...diagnostics,
+      rawResponse: rawText,
+    });
+
+    return null;
+  }
+
   const jsonText = extractJson(rawText);
 
   if (!jsonText) {
+    logClassifierFailure({
+      stage: "json-extraction",
+      error: new Error("Could not extract JSON from Gemini response"),
+      ...diagnostics,
+      rawResponse: rawText,
+    });
+
+    return null;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(jsonText) as unknown;
+  } catch (error) {
+    logClassifierFailure({
+      stage: "json-parse",
+      error,
+      ...diagnostics,
+      rawResponse: rawText,
+    });
+
     return null;
   }
 
   try {
-    const parsed = JSON.parse(jsonText) as unknown;
     return financialTextClassificationSchema.parse(parsed);
-  } catch {
+  } catch (error) {
+    logClassifierFailure({
+      stage: "zod-validation",
+      error,
+      ...diagnostics,
+      rawResponse: rawText,
+    });
+
     return null;
   }
 }
@@ -95,9 +191,11 @@ export class FinancialTextClassifier {
       return { status: "not_configured" };
     }
 
+    const diagnostics = this.geminiService.getDiagnostics();
+
     try {
       const rawResponse = await this.geminiService.generateText(buildPrompt(message));
-      const classification = parseClassification(rawResponse);
+      const classification = parseClassification(rawResponse, diagnostics);
 
       if (!classification) {
         return {
@@ -125,7 +223,13 @@ export class FinancialTextClassifier {
       }
 
       return { status: "valid", classification };
-    } catch {
+    } catch (error) {
+      logClassifierFailure({
+        stage: "classifier",
+        error,
+        ...diagnostics,
+      });
+
       return {
         status: "needs_confirmation",
         message: "Tive um problema ao classificar essa mensagem com IA. Pode reformular com valor, descrição e tipo da movimentação?",
