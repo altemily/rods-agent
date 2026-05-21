@@ -183,11 +183,134 @@ function parseClassification(rawText: string, diagnostics: { model: string; hasA
   }
 }
 
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function parseAmount(value: string): number {
+  const cleaned = value.trim();
+
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(cleaned)) {
+    return Number(cleaned.replace(/\./g, "").replace(",", "."));
+  }
+
+  if (cleaned.includes(",")) {
+    return Number(cleaned.replace(/\./g, "").replace(",", "."));
+  }
+
+  return Number(cleaned);
+}
+
+function inferFallbackCategory(normalizedMessage: string): string {
+  if (/mercado|supermercado|feira|alimentacao|comida/.test(normalizedMessage)) {
+    return "Alimentação";
+  }
+
+  if (/ifood|delivery|lanche|pizza|hamburguer|restaurante/.test(normalizedMessage)) {
+    return "Delivery";
+  }
+
+  if (/uber|99|onibus|transporte|gasolina|combustivel/.test(normalizedMessage)) {
+    return "Transporte";
+  }
+
+  if (/salario|pix recebido|recebi|renda|pagamento recebido/.test(normalizedMessage)) {
+    return "Renda";
+  }
+
+  if (/caixinha|reserva|investimento|investi|guardei|poupei/.test(normalizedMessage)) {
+    return "Reserva";
+  }
+
+  return "Outros";
+}
+
+function inferFallbackNecessityLevel(normalizedMessage: string): FinancialTextClassification["necessityLevel"] {
+  if (/mercado|supermercado|feira|remedio|farmacia|aluguel|energia|agua|internet/.test(normalizedMessage)) {
+    return "ESSENTIAL";
+  }
+
+  if (/uber|99|onibus|transporte|gasolina|combustivel/.test(normalizedMessage)) {
+    return "NECESSARY";
+  }
+
+  if (/ifood|delivery|lanche|pizza|hamburguer/.test(normalizedMessage)) {
+    return "IMPULSIVE";
+  }
+
+  return "OPTIONAL";
+}
+
+function buildFallbackClassification(message: string): FinancialTextClassification | null {
+  const amountMatch = message.match(/(?:r\$\s*)?((?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?|\d+\.\d{1,2})/i);
+
+  if (!amountMatch?.[1]) {
+    return null;
+  }
+
+  const amount = parseAmount(amountMatch[1]);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  const normalizedMessage = normalizeText(message);
+
+  const isBoxContribution = /caixinha|reserva|investimento|investi|guardei|poupei/.test(normalizedMessage);
+
+  const isIncome = /recebi|ganhei|salario|pix recebido|renda|entrada|pagamento recebido/.test(normalizedMessage);
+
+  let intent: FinancialTextClassification["intent"] = "REGISTER_EXPENSE";
+
+  if (isBoxContribution) {
+    intent = "REGISTER_BOX_CONTRIBUTION";
+  } else if (isIncome) {
+    intent = "REGISTER_INCOME";
+  }
+
+  const description =
+    message
+      .replace(amountMatch[0], "")
+      .replace(
+        /\b(gastei|paguei|comprei|recebi|ganhei|coloquei|guardei|investi|reais|real|r\$|no|na|em|com|de|do|da|para|pra)\b/gi,
+        "",
+      )
+      .replace(/\s+/g, " ")
+      .trim() || "Movimentação financeira";
+
+  const classification: FinancialTextClassification = {
+    intent,
+    amount,
+    description,
+    category: inferFallbackCategory(normalizedMessage),
+    necessityLevel: intent === "REGISTER_EXPENSE" ? inferFallbackNecessityLevel(normalizedMessage) : null,
+    boxName: intent === "REGISTER_BOX_CONTRIBUTION" ? description : null,
+    confidence: 0.8,
+    needsConfirmation: false,
+    clarificationQuestion: null,
+  };
+
+  try {
+    return financialTextClassificationSchema.parse(classification);
+  } catch {
+    return null;
+  }
+}
+
 export class FinancialTextClassifier {
   constructor(private readonly geminiService = new GeminiService()) {}
 
   async classify(message: string): Promise<ClassificationResult> {
+    const fallbackClassification = buildFallbackClassification(message);
+
     if (!this.geminiService.isConfigured()) {
+      if (fallbackClassification) {
+        return { status: "valid", classification: fallbackClassification };
+      }
+
       return { status: "not_configured" };
     }
 
@@ -198,6 +321,10 @@ export class FinancialTextClassifier {
       const classification = parseClassification(rawResponse, diagnostics);
 
       if (!classification) {
+        if (fallbackClassification) {
+          return { status: "valid", classification: fallbackClassification };
+        }
+
         return {
           status: "needs_confirmation",
           message: "Não consegui validar a classificação da IA. Pode confirmar o valor, categoria e se é gasto, renda ou caixinha?",
@@ -213,6 +340,10 @@ export class FinancialTextClassifier {
         classification.needsConfirmation ||
         classification.amount === null
       ) {
+        if (fallbackClassification) {
+          return { status: "valid", classification: fallbackClassification };
+        }
+
         return {
           status: "needs_confirmation",
           message:
@@ -229,6 +360,10 @@ export class FinancialTextClassifier {
         error,
         ...diagnostics,
       });
+
+      if (fallbackClassification) {
+        return { status: "valid", classification: fallbackClassification };
+      }
 
       return {
         status: "needs_confirmation",

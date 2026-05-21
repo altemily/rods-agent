@@ -1,11 +1,17 @@
 import { FinancialTextClassifier } from "./financialTextClassifier";
 import { OnboardingAgent } from "./onboardingAgent";
-import { NotionService, notionService as defaultNotionService } from "../services/notion.service";
+import {
+  NotionService,
+  notionService as defaultNotionService,
+} from "../services/notion.service";
 import { ContextualRoastGenerator } from "./contextualRoastGenerator";
 import type { FinancialTextClassification } from "./schemas";
 
 type PersistableFinancialClassification = FinancialTextClassification & {
-  intent: "REGISTER_EXPENSE" | "REGISTER_INCOME" | "REGISTER_BOX_CONTRIBUTION";
+  intent:
+    | "REGISTER_EXPENSE"
+    | "REGISTER_INCOME"
+    | "REGISTER_BOX_CONTRIBUTION";
   amount: number;
   needsConfirmation: false;
 };
@@ -23,14 +29,27 @@ export class RodsAgent {
     const command = normalizedMessage.toLowerCase();
 
     if (command === "/start") {
-      return this.onboardingAgent.start(chatId);
+      await this.ensureCompletedProfileLoaded(chatId);
+
+      const response = this.onboardingAgent.start(chatId);
+
+      if (!this.onboardingAgent.isCompleted(chatId)) {
+        await this.persistStartedProfile(chatId);
+      }
+
+      return response;
     }
 
     if (command === "/reset") {
-      return this.onboardingAgent.reset(chatId);
+      const response = this.onboardingAgent.reset(chatId);
+      await this.persistStartedProfile(chatId);
+
+      return response;
     }
 
     if (command === "/status") {
+      await this.ensureCompletedProfileLoaded(chatId);
+
       return this.onboardingAgent.getStatus(chatId);
     }
 
@@ -39,11 +58,25 @@ export class RodsAgent {
         return "Comando de desenvolvimento desativado neste ambiente.";
       }
 
-      return this.onboardingAgent.seedCompletedProfile(chatId);
+      const response = this.onboardingAgent.seedCompletedProfile(chatId);
+      await this.persistCompletedProfile(chatId);
+
+      return response;
     }
 
+    await this.ensureCompletedProfileLoaded(chatId);
+
     if (!this.onboardingAgent.isCompleted(chatId)) {
-      return this.onboardingAgent.handleMessage(chatId, normalizedMessage);
+      const response = this.onboardingAgent.handleMessage(
+        chatId,
+        normalizedMessage,
+      );
+
+      if (this.onboardingAgent.isCompleted(chatId)) {
+        await this.persistCompletedProfile(chatId);
+      }
+
+      return response;
     }
 
     const result = await this.financialTextClassifier.classify(normalizedMessage);
@@ -78,7 +111,10 @@ export class RodsAgent {
     const profile = this.onboardingAgent.getCompletedProfile(chatId);
 
     if (!profile) {
-      return this.formatClassificationPreview(result.classification, notionResult.success);
+      return this.formatClassificationPreview(
+        result.classification,
+        notionResult.success,
+      );
     }
 
     const contextualRoast = await this.contextualRoastGenerator.generate({
@@ -87,7 +123,73 @@ export class RodsAgent {
       notionSaved: notionResult.success,
     });
 
-    return this.formatFinalResponse(result.classification, notionResult.success, contextualRoast.roast);
+    return this.formatFinalResponse(
+      result.classification,
+      notionResult.success,
+      contextualRoast.roast,
+    );
+  }
+
+  private async ensureCompletedProfileLoaded(
+    chatId: string | number,
+  ): Promise<boolean> {
+    if (this.onboardingAgent.isCompleted(chatId)) {
+      await this.persistCompletedProfile(chatId);
+      return true;
+    }
+
+    const storedProfile =
+      await this.notionService.findUserProfileByTelegramId(chatId);
+
+    if (!storedProfile || storedProfile.status !== "ONBOARDING_COMPLETED") {
+      return false;
+    }
+
+    return this.onboardingAgent.restoreCompletedProfile(
+      chatId,
+      storedProfile.profile,
+    );
+  }
+
+  private async persistCompletedProfile(chatId: string | number): Promise<void> {
+    const profile = this.onboardingAgent.getCompletedProfile(chatId);
+
+    if (!profile) {
+      return;
+    }
+
+    const result = await this.notionService.saveUserProfile({
+      telegramUserId: chatId,
+      status: "ONBOARDING_COMPLETED",
+      profile,
+    });
+
+    if (!result.success) {
+      console.error(
+        "[RODS][Onboarding] Failed to persist completed profile",
+        result.error,
+      );
+    }
+  }
+
+  private async persistStartedProfile(chatId: string | number): Promise<void> {
+    const result = await this.notionService.saveUserProfile({
+      telegramUserId: chatId,
+      status: "ONBOARDING_STARTED",
+      profile: {
+        userId: String(chatId),
+        chatId,
+        status: "ONBOARDING_IN_PROGRESS",
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    if (!result.success) {
+      console.error(
+        "[RODS][Onboarding] Failed to persist started profile",
+        result.error,
+      );
+    }
   }
 
   private isPersistableClassification(
@@ -101,7 +203,10 @@ export class RodsAgent {
     );
   }
 
-  private formatClassificationPreview(classification: FinancialTextClassification, notionSaved: boolean): string {
+  private formatClassificationPreview(
+    classification: FinancialTextClassification,
+    notionSaved: boolean,
+  ): string {
     return [
       "Classificação prévia do RODS:",
       `Tipo: ${this.formatIntent(classification.intent)}`,
@@ -146,7 +251,9 @@ export class RodsAgent {
     return labels[intent];
   }
 
-  private formatNecessityLevel(necessityLevel: FinancialTextClassification["necessityLevel"]): string {
+  private formatNecessityLevel(
+    necessityLevel: FinancialTextClassification["necessityLevel"],
+  ): string {
     if (!necessityLevel) {
       return "não informado";
     }

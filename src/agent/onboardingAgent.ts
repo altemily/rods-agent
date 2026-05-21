@@ -1,4 +1,8 @@
-import type { CompletedOnboardingProfile, Onboarding, OnboardingStep } from "./schemas";
+import type {
+  CompletedOnboardingProfile,
+  Onboarding,
+  OnboardingStep,
+} from "./schemas";
 
 type ChatId = string | number;
 
@@ -15,7 +19,8 @@ const QUESTIONS: OnboardingQuestion[] = [
   {
     step: "monthlyIncome",
     label: "renda mensal",
-    question: "Qual é sua renda mensal aproximada? Pode responder em texto livre, sem planilha heroica agora.",
+    question:
+      "Qual é sua renda mensal aproximada? Pode responder em texto livre, sem planilha heroica agora.",
   },
   {
     step: "incomeFrequency",
@@ -25,12 +30,14 @@ const QUESTIONS: OnboardingQuestion[] = [
   {
     step: "fixedExpenses",
     label: "despesas fixas",
-    question: "Quais são suas principais despesas fixas? Aluguel, contas, assinaturas, transporte... pode listar do seu jeito.",
+    question:
+      "Quais são suas principais despesas fixas? Aluguel, contas, assinaturas, transporte... pode listar do seu jeito.",
   },
   {
     step: "debts",
     label: "dívidas",
-    question: "Você tem dívidas hoje? Se sim, quais? Se não tiver, pode mandar 'não tenho' e seguimos felizes por 4 segundos.",
+    question:
+      "Você tem dívidas hoje? Se sim, quais? Se não tiver, pode mandar 'não tenho' e seguimos felizes por 4 segundos.",
   },
   {
     step: "mainGoal",
@@ -50,32 +57,38 @@ const QUESTIONS: OnboardingQuestion[] = [
   {
     step: "weeklyRoutine",
     label: "rotina semanal",
-    question: "Como é sua rotina semanal? Trabalho, estudos, deslocamento, rolês, delivery, tudo que mexe no bolso.",
+    question:
+      "Como é sua rotina semanal? Trabalho, estudos, deslocamento, rolês, delivery, tudo que mexe no bolso.",
   },
   {
     step: "spendingTriggers",
     label: "gatilhos de consumo",
-    question: "Quais situações costumam disparar gastos? Cansaço, ansiedade, promoção, fome, tédio, social?",
+    question:
+      "Quais situações costumam disparar gastos? Cansaço, ansiedade, promoção, fome, tédio, social?",
   },
   {
     step: "riskCategories",
     label: "categorias de risco",
-    question: "Quais categorias mais ameaçam seu orçamento? Ex: comida fora, apps, roupas, transporte, lazer, mercado.",
+    question:
+      "Quais categorias mais ameaçam seu orçamento? Ex: comida fora, apps, roupas, transporte, lazer, mercado.",
   },
   {
     step: "boxesAndInvestments",
     label: "caixinhas/investimentos",
-    question: "Você já tem caixinhas, reserva ou investimentos? Pode dizer 'não tenho' sem drama contábil.",
+    question:
+      "Você já tem caixinhas, reserva ou investimentos? Pode dizer 'não tenho' sem drama contábil.",
   },
   {
     step: "roastLevel",
     label: "nível de roast",
-    question: "Qual nível de roast você aceita do RODS? Leve, médio ou modo boleto vencido? Prometo calibrar sem violência gratuita.",
+    question:
+      "Qual nível de roast você aceita do RODS? Leve, médio ou modo boleto vencido? Prometo calibrar sem violência gratuita.",
   },
   {
     step: "sensitiveLimits",
     label: "limites sensíveis",
-    question: "Tem algum limite sensível que eu não devo cruzar? Ex: temas, palavras, situações pessoais. Pode responder 'pular'.",
+    question:
+      "Tem algum limite sensível que eu não devo cruzar? Ex: temas, palavras, situações pessoais. Pode responder 'pular'.",
   },
 ];
 
@@ -141,9 +154,68 @@ function answerFor(state: Onboarding, step: OnboardingQuestion["step"]): string 
   return state.answers[step] ?? "não informado";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getStringFromProfile(
+  profile: Record<string, unknown>,
+  key: keyof CompletedOnboardingProfile,
+): string {
+  const value = profile[key];
+
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+
+  return "não informado";
+}
+
 export class OnboardingAgent {
   isCompleted(chatId: ChatId): boolean {
-    return onboardingStates.get(normalizeChatId(chatId))?.status === "ONBOARDING_COMPLETED";
+    return (
+      onboardingStates.get(normalizeChatId(chatId))?.status ===
+      "ONBOARDING_COMPLETED"
+    );
+  }
+
+  restoreCompletedProfile(chatId: ChatId, profile: unknown): boolean {
+    if (!isRecord(profile)) {
+      return false;
+    }
+
+    const completedAt =
+      typeof profile.completedAt === "string" && profile.completedAt.trim()
+        ? profile.completedAt
+        : nowIso();
+
+    const state: Onboarding = {
+      userId: normalizeChatId(chatId),
+      chatId,
+      status: "ONBOARDING_COMPLETED",
+      currentStep: "completed",
+      answers: {
+        monthlyIncome: getStringFromProfile(profile, "monthlyIncome"),
+        incomeFrequency: getStringFromProfile(profile, "incomeFrequency"),
+        fixedExpenses: getStringFromProfile(profile, "fixedExpenses"),
+        debts: getStringFromProfile(profile, "debts"),
+        mainGoal: getStringFromProfile(profile, "mainGoal"),
+        goalAmount: getStringFromProfile(profile, "goalAmount"),
+        goalDeadline: getStringFromProfile(profile, "goalDeadline"),
+        weeklyRoutine: getStringFromProfile(profile, "weeklyRoutine"),
+        spendingTriggers: getStringFromProfile(profile, "spendingTriggers"),
+        riskCategories: getStringFromProfile(profile, "riskCategories"),
+        boxesAndInvestments: getStringFromProfile(profile, "boxesAndInvestments"),
+        roastLevel: getStringFromProfile(profile, "roastLevel"),
+        sensitiveLimits: getStringFromProfile(profile, "sensitiveLimits"),
+      },
+      startedAt: completedAt,
+      completedAt,
+    };
+
+    onboardingStates.set(normalizeChatId(chatId), state);
+
+    return true;
   }
 
   getCompletedProfile(chatId: ChatId): CompletedOnboardingProfile | null {
@@ -187,18 +259,23 @@ export class OnboardingAgent {
       return "Sua calibração já foi concluída. Se quiser refazer a entrevista do zero, use /reset.";
     }
 
-    return `Você já está em calibração. Nada de reiniciar no susto.\n\n${formatCurrentQuestion(existingState)}`;
+    return `Você já está em calibração. Nada de reiniciar no susto.\n\n${formatCurrentQuestion(
+      existingState,
+    )}`;
   }
 
   reset(chatId: ChatId): string {
     const state = createInitialState(chatId);
     onboardingStates.set(normalizeChatId(chatId), state);
 
-    return `Calibração reiniciada.\n\n${OPENING_MESSAGE}\n\n${formatCurrentQuestion(state)}`;
+    return `Calibração reiniciada.\n\n${OPENING_MESSAGE}\n\n${formatCurrentQuestion(
+      state,
+    )}`;
   }
 
   seedCompletedProfile(chatId: ChatId): string {
     const timestamp = nowIso();
+
     const state: Onboarding = {
       userId: normalizeChatId(chatId),
       chatId,
@@ -259,7 +336,9 @@ export class OnboardingAgent {
       return this.buildSummary(state);
     }
 
-    return `Registrado. Sem julgamento ainda - só calibragem.\n\n${formatCurrentQuestion(state)}`;
+    return `Registrado. Sem julgamento ainda - só calibragem.\n\n${formatCurrentQuestion(
+      state,
+    )}`;
   }
 
   private buildSummary(state: Onboarding): string {
