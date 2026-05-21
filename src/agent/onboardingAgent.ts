@@ -81,6 +81,22 @@ const QUESTIONS: OnboardingQuestion[] = [
 
 const onboardingStates = new Map<string, Onboarding>();
 
+const DEV_SEED_ANSWERS: Onboarding["answers"] = {
+  monthlyIncome: "5000",
+  incomeFrequency: "mensal",
+  fixedExpenses: "aluguel, internet, energia, mercado",
+  debts: "não tenho",
+  mainGoal: "montar reserva de emergência",
+  goalAmount: "10000",
+  goalDeadline: "12 meses",
+  weeklyRoutine: "trabalho, estudo e rotina corrida",
+  spendingTriggers: "delivery e compras por cansaço",
+  riskCategories: "comida fora e tecnologia",
+  boxesAndInvestments: "reserva, setup",
+  roastLevel: "controlado",
+  sensitiveLimits: "não usar saúde, família ou aparência",
+};
+
 function normalizeChatId(chatId: ChatId): string {
   return String(chatId);
 }
@@ -179,6 +195,23 @@ export class OnboardingAgent {
     onboardingStates.set(normalizeChatId(chatId), state);
 
     return `Calibração reiniciada.\n\n${OPENING_MESSAGE}\n\n${formatCurrentQuestion(state)}`;
+  }
+
+  seedCompletedProfile(chatId: ChatId): string {
+    const timestamp = nowIso();
+    const state: Onboarding = {
+      userId: normalizeChatId(chatId),
+      chatId,
+      status: "ONBOARDING_COMPLETED",
+      currentStep: "completed",
+      answers: { ...DEV_SEED_ANSWERS },
+      startedAt: timestamp,
+      completedAt: timestamp,
+    };
+
+    onboardingStates.set(normalizeChatId(chatId), state);
+
+    return "Perfil de teste carregado. Onboarding marcado como concluído. Agora você pode testar movimentações.";
   }
 
   getStatus(chatId: ChatId): string {

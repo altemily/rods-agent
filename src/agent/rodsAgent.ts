@@ -34,6 +34,14 @@ export class RodsAgent {
       return this.onboardingAgent.getStatus(chatId);
     }
 
+    if (command === "/devseed") {
+      if (process.env.ENABLE_DEV_SEED !== "true") {
+        return "Comando de desenvolvimento desativado neste ambiente.";
+      }
+
+      return this.onboardingAgent.seedCompletedProfile(chatId);
+    }
+
     if (!this.onboardingAgent.isCompleted(chatId)) {
       return this.onboardingAgent.handleMessage(chatId, normalizedMessage);
     }

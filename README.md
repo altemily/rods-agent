@@ -55,6 +55,14 @@ GEMINI_MODEL=gemini-2.5-flash
 
 Se `GEMINI_API_KEY` não estiver configurada, o bot continua funcionando, mas avisa que a classificação por IA ainda não está ativa.
 
+Para habilitar comandos auxiliares de desenvolvimento/teste, configure:
+
+```text
+ENABLE_DEV_SEED=true
+```
+
+Sem esse valor, o comando `/devseed` fica desativado.
+
 Para habilitar o registro de movimentações no Notion, configure:
 
 ```text
@@ -93,8 +101,15 @@ Comandos disponíveis:
 - `/start`: inicia a calibração se ela ainda não começou.
 - `/status`: informa a etapa atual da calibração.
 - `/reset`: apaga o estado em memória e reinicia a calibração.
+- `/devseed`: comando auxiliar de desenvolvimento/teste que carrega um perfil concluído para o chat atual quando `ENABLE_DEV_SEED=true`.
 
 Durante a entrevista, qualquer mensagem comum responde à pergunta atual e avança para a próxima etapa. Ao final, o RODS gera um resumo simples baseado nas respostas coletadas.
+
+### Comando de desenvolvimento `/devseed`
+
+O comando `/devseed` existe para facilitar demos e testes enquanto o onboarding ainda é mantido em memória. Quando `ENABLE_DEV_SEED=true`, ele cria um perfil de teste completo no mesmo `Map` usado pelo onboarding e marca o status como `ONBOARDING_COMPLETED`.
+
+Esse comando não persiste onboarding, não integra Notion e não cria databases. Ele é temporário e deve ser substituído por persistência real futuramente.
 
 ## Classificação Textual
 
