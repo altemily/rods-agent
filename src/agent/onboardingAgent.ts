@@ -13,19 +13,20 @@ type OnboardingQuestion = {
 };
 
 const OPENING_MESSAGE =
-  "Antes de eu sair julgando seus gastos com confiança, preciso calibrar seu radar financeiro. Sem contexto, meu roast vira só piada genérica - e a gente não está aqui para isso.";
+  "Antes de começar a julgar seus gastos com confiança, preciso calibrar seu radar financeiro. Sem contexto, minha análise vira achismo financeiro — e aqui a humilhação é personalizada.";
 
 const QUESTIONS: OnboardingQuestion[] = [
   {
     step: "monthlyIncome",
     label: "renda mensal",
     question:
-      "Qual é sua renda mensal aproximada? Pode responder em texto livre, sem planilha heroica agora.",
+      "Qual é sua renda mensal aproximada? Pode responder em texto livre, sem planilha heróica agora.",
   },
   {
     step: "incomeFrequency",
     label: "frequência de recebimento",
-    question: "Com que frequência você recebe? Mensal, quinzenal, semanal, variável?",
+    question:
+      "Com que frequência você recebe? Mensal, quinzenal, semanal, variável?",
   },
   {
     step: "fixedExpenses",
@@ -41,24 +42,27 @@ const QUESTIONS: OnboardingQuestion[] = [
   },
   {
     step: "mainGoal",
-    label: "meta principal",
-    question: "Qual é sua principal meta financeira agora?",
+    label: "metas financeiras",
+    question:
+      "Quais metas financeiras você quer acompanhar? Pode mandar uma ou várias, uma por linha ou separadas por vírgula. Ex: reserva de emergência, viagem, carro novo .",
   },
   {
     step: "goalAmount",
-    label: "valor da meta",
-    question: "Qual é o valor aproximado dessa meta?",
+    label: "valores das metas",
+    question:
+      "Qual é o valor aproximado de cada meta? Pode responder do seu jeito. Ex: reserva R$ 10.000, viagem R$ 5.000, carro novo: 80.000.",
   },
   {
     step: "goalDeadline",
-    label: "prazo da meta",
-    question: "Em quanto tempo você quer chegar nessa meta?",
+    label: "prazos das metas",
+    question:
+      "Qual é o prazo de cada meta? Ex: reserva em 12 meses, viagem em 2027.",
   },
   {
     step: "weeklyRoutine",
     label: "rotina semanal",
     question:
-      "Como é sua rotina semanal? Trabalho, estudos, deslocamento, rolês, delivery, tudo que mexe no bolso.",
+      "Como sua rotina da semana costuma impactar seus gastos? Ex: trabalho presencial, estudos, transporte, mercado, delivery, saídas, filhos, pets ou qualquer hábito que mexa no bolso.",
   },
   {
     step: "spendingTriggers",
@@ -74,15 +78,15 @@ const QUESTIONS: OnboardingQuestion[] = [
   },
   {
     step: "boxesAndInvestments",
-    label: "caixinhas/investimentos",
+    label: "cofrinhos, caixinhas e investimentos",
     question:
-      "Você já tem caixinhas, reserva ou investimentos? Pode dizer 'não tenho' sem drama contábil.",
+      "Quais cofrinhos, caixinhas, reservas ou investimentos você já tem hoje? Ex: emergência, viagem, filhos, investimentos, conta parada. Pode dizer o nome e o valor aproximado se quiser.",
   },
   {
     step: "roastLevel",
-    label: "nível de roast",
+    label: "tom da cobrança",
     question:
-      "Qual nível de roast você aceita do RODS? Leve, médio ou modo boleto vencido? Prometo calibrar sem violência gratuita.",
+      "Qual tom de cobrança você aceita do RODS? Modo Passo Pano, Modo Fatura Chegando ou Modo Boleto Vencido? Prometo calibrar sem violência gratuita.",
   },
   {
     step: "sensitiveLimits",
@@ -99,13 +103,16 @@ const DEV_SEED_ANSWERS: Onboarding["answers"] = {
   incomeFrequency: "mensal",
   fixedExpenses: "aluguel, internet, energia, mercado",
   debts: "não tenho",
-  mainGoal: "montar reserva de emergência",
-  goalAmount: "10000",
-  goalDeadline: "12 meses",
+  mainGoal: "reserva de emergência, setup novo, viagem e CNH",
+  goalAmount:
+    "reserva: R$ 10.000; setup: R$ 8.000; viagem: R$ 5.000; CNH: R$ 3.000",
+  goalDeadline:
+    "reserva: 12 meses; setup: dezembro de 2026; viagem: 2027; CNH: até o final de 2026",
   weeklyRoutine: "trabalho, estudo e rotina corrida",
   spendingTriggers: "delivery e compras por cansaço",
-  riskCategories: "comida fora e tecnologia",
-  boxesAndInvestments: "reserva, setup",
+  riskCategories: "comida fora, tecnologia e compras por impulso",
+  boxesAndInvestments:
+    "emergência: R$ 500; setup: R$ 200; viagem: R$ 0; investimentos: ainda não tenho",
   roastLevel: "controlado",
   sensitiveLimits: "não usar saúde, família ou aparência",
 };
@@ -205,7 +212,10 @@ export class OnboardingAgent {
         weeklyRoutine: getStringFromProfile(profile, "weeklyRoutine"),
         spendingTriggers: getStringFromProfile(profile, "spendingTriggers"),
         riskCategories: getStringFromProfile(profile, "riskCategories"),
-        boxesAndInvestments: getStringFromProfile(profile, "boxesAndInvestments"),
+        boxesAndInvestments: getStringFromProfile(
+          profile,
+          "boxesAndInvestments",
+        ),
         roastLevel: getStringFromProfile(profile, "roastLevel"),
         sensitiveLimits: getStringFromProfile(profile, "sensitiveLimits"),
       },
@@ -336,7 +346,7 @@ export class OnboardingAgent {
       return this.buildSummary(state);
     }
 
-    return `Registrado. Sem julgamento ainda - só calibragem.\n\n${formatCurrentQuestion(
+    return `Registrado. Sem julgamento ainda — só calibragem.\n\n${formatCurrentQuestion(
       state,
     )}`;
   }
@@ -350,14 +360,17 @@ export class OnboardingAgent {
       `- Frequência de recebimento: ${answerFor(state, "incomeFrequency")}`,
       `- Despesas fixas: ${answerFor(state, "fixedExpenses")}`,
       `- Dívidas: ${answerFor(state, "debts")}`,
-      `- Meta principal: ${answerFor(state, "mainGoal")}`,
-      `- Valor da meta: ${answerFor(state, "goalAmount")}`,
-      `- Prazo da meta: ${answerFor(state, "goalDeadline")}`,
+      `- Metas financeiras: ${answerFor(state, "mainGoal")}`,
+      `- Valores das metas: ${answerFor(state, "goalAmount")}`,
+      `- Prazos das metas: ${answerFor(state, "goalDeadline")}`,
       `- Rotina semanal: ${answerFor(state, "weeklyRoutine")}`,
       `- Gatilhos de consumo: ${answerFor(state, "spendingTriggers")}`,
       `- Categorias de risco: ${answerFor(state, "riskCategories")}`,
-      `- Caixinhas/investimentos: ${answerFor(state, "boxesAndInvestments")}`,
-      `- Nível de roast: ${answerFor(state, "roastLevel")}`,
+      `- Cofrinhos, caixinhas e investimentos: ${answerFor(
+        state,
+        "boxesAndInvestments",
+      )}`,
+      `- Tom da cobrança: ${answerFor(state, "roastLevel")}`,
       `- Limites sensíveis: ${answerFor(state, "sensitiveLimits")}`,
       "",
       "Agora mande uma movimentação financeira para eu classificar, registrar no Notion e comentar com contexto.",
