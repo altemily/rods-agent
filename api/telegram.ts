@@ -17,18 +17,63 @@ type TelegramUpdate = {
     chat?: {
       id?: string | number;
     };
+    from?: {
+      id?: string | number;
+      username?: string;
+      first_name?: string;
+    };
     text?: unknown;
   };
 };
 
+type ParsedTelegramUpdate = {
+  chatId: string | number | undefined;
+  userId: string | undefined;
+  text: string;
+};
+
 const rodsAgent = new RodsAgent();
 
-function parseTelegramUpdate(body: unknown): { chatId: string | number | undefined; text: string } {
+function parseTelegramUpdate(body: unknown): ParsedTelegramUpdate {
   const update = body as TelegramUpdate;
-  const chatId = update.message?.chat?.id;
-  const text = typeof update.message?.text === "string" ? update.message.text : "";
 
-  return { chatId, text };
+  const chatId = update.message?.chat?.id;
+  const rawUserId = update.message?.from?.id;
+  const userId = rawUserId ? String(rawUserId) : undefined;
+
+  const text =
+    typeof update.message?.text === "string" ? update.message.text : "";
+
+  return { chatId, userId, text };
+}
+
+function getAllowedTelegramUserIds(): Set<string> {
+  const rawAllowedIds = process.env.TELEGRAM_ALLOWED_USER_IDS ?? "";
+
+  return new Set(
+    rawAllowedIds
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+
+function isAuthorizedTelegramUser(userId: string | undefined): boolean {
+  if (!userId) {
+    return false;
+  }
+
+  const allowedUserIds = getAllowedTelegramUserIds();
+
+  if (allowedUserIds.size === 0) {
+    console.error(
+      "TELEGRAM_ALLOWED_USER_IDS não configurado. Bloqueando acesso por segurança.",
+    );
+
+    return false;
+  }
+
+  return allowedUserIds.has(userId);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -37,10 +82,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { chatId, text } = parseTelegramUpdate(req.body);
+  const { chatId, userId, text } = parseTelegramUpdate(req.body);
 
   if (!chatId) {
     return res.status(200).json({ ok: true, ignored: true });
+  }
+
+  if (!isAuthorizedTelegramUser(userId)) {
+    console.warn("Tentativa de acesso não autorizado ao bot.", {
+      chatId,
+      userId,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      ignored: true,
+      reason: "Unauthorized Telegram user",
+    });
   }
 
   try {
