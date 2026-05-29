@@ -1,5 +1,11 @@
 import { notionService } from "../src/services/notion.service";
 import type {
+  DashboardApiRequest,
+  DashboardApiResponse,
+} from "../src/http/dashboardApi";
+import { setCorsHeaders } from "../src/http/dashboardCors";
+import { isDashboardSessionValid } from "../src/http/dashboardSession";
+import type {
   DashboardAlert,
   DashboardCategory,
   DashboardHistoryItem,
@@ -8,52 +14,8 @@ import type {
   DashboardSummary,
 } from "../src/types/dashboard";
 
-type VercelRequest = {
-  method?: string;
-  headers?: Record<string, string | string[] | undefined>;
-  query?: Record<string, string | string[] | undefined>;
-};
-
-type VercelResponse = {
-  status: (statusCode: number) => VercelResponse;
-  json: (body: unknown) => void;
-  setHeader: (name: string, value: string) => void;
-  end: () => void;
-};
-
 const COMPETENCE_PATTERN = /^\d{4}-\d{2}$/;
 const DASHBOARD_TIME_ZONE = "America/Fortaleza";
-const DEVELOPMENT_DASHBOARD_ORIGIN = "http://localhost:5173";
-
-function getHeaderValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-
-  return value ?? null;
-}
-
-function getAllowedOrigins(): Set<string> {
-  const origins = new Set<string>([DEVELOPMENT_DASHBOARD_ORIGIN]);
-  const configuredOrigin = process.env.DASHBOARD_ALLOWED_ORIGIN?.trim();
-
-  if (configuredOrigin) {
-    origins.add(configuredOrigin);
-  }
-
-  return origins;
-}
-
-function setCorsHeaders(res: VercelResponse, req: VercelRequest): void {
-  const origin = getHeaderValue(req.headers?.origin);
-
-  if (origin && getAllowedOrigins().has(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-}
 
 function getCurrentCompetence(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -244,8 +206,11 @@ function buildAlerts(summary: DashboardSummary): DashboardAlert[] {
   return [];
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  setCorsHeaders(res, req);
+export default async function handler(
+  req: DashboardApiRequest,
+  res: DashboardApiResponse,
+) {
+  setCorsHeaders(res, req, "GET, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.status(204).end();
@@ -254,6 +219,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET, OPTIONS");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!isDashboardSessionValid(req)) {
+    return res.status(401).json({
+      message: "Não autenticado.",
+    });
   }
 
   const competence =
