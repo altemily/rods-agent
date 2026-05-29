@@ -1,4 +1,10 @@
 import { Client } from "@notionhq/client";
+import type {
+  DashboardBox,
+  DashboardInvoice,
+  DashboardMovement,
+  DashboardMovementType,
+} from "../types/dashboard";
 
 type MovementIntent =
   | "REGISTER_EXPENSE"
@@ -47,6 +53,13 @@ type NotionQueryResponse = {
     id: string;
     properties?: Record<string, unknown>;
   }>;
+  has_more?: boolean;
+  next_cursor?: string | null;
+};
+
+type NotionDateRangeFilter = {
+  start: string;
+  end: string;
 };
 
 const NOTION_VERSION = "2022-06-28";
@@ -108,6 +121,34 @@ function getRichTextContent(property: unknown): string {
   return "";
 }
 
+function getTitleContent(property: unknown): string {
+  if (
+    typeof property === "object" &&
+    property !== null &&
+    "type" in property &&
+    property.type === "title" &&
+    "title" in property &&
+    Array.isArray(property.title)
+  ) {
+    return property.title
+      .map((item) => {
+        if (
+          typeof item === "object" &&
+          item !== null &&
+          "plain_text" in item &&
+          typeof item.plain_text === "string"
+        ) {
+          return item.plain_text;
+        }
+
+        return "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
 function getSelectName(property: unknown): string | null {
   if (
     typeof property === "object" &&
@@ -126,6 +167,55 @@ function getSelectName(property: unknown): string | null {
   return null;
 }
 
+function getNumberValue(property: unknown): number | null {
+  if (
+    typeof property === "object" &&
+    property !== null &&
+    "type" in property &&
+    property.type === "number" &&
+    "number" in property &&
+    typeof property.number === "number"
+  ) {
+    return property.number;
+  }
+
+  return null;
+}
+
+function getDateStart(property: unknown): string | null {
+  if (
+    typeof property === "object" &&
+    property !== null &&
+    "type" in property &&
+    property.type === "date" &&
+    "date" in property &&
+    property.date &&
+    typeof property.date === "object" &&
+    "start" in property.date &&
+    typeof property.date.start === "string"
+  ) {
+    return property.date.start;
+  }
+
+  return null;
+}
+
+function mapMovementType(typeLabel: string | null): DashboardMovementType {
+  if (typeLabel === "Entrada") {
+    return "INCOME";
+  }
+
+  if (typeLabel === "Caixinha") {
+    return "BOX_CONTRIBUTION";
+  }
+
+  return "EXPENSE";
+}
+
+function isMissingNotionDatabaseError(status: number, body: string): boolean {
+  return status === 404 || body.includes("object_not_found");
+}
+
 export class NotionService {
   private readonly client: Client | null;
 
@@ -133,6 +223,8 @@ export class NotionService {
     private readonly token = process.env.NOTION_TOKEN,
     private readonly movementsDatabaseId = process.env.NOTION_MOVEMENTS_DATABASE_ID,
     private readonly usersDatabaseId = process.env.NOTION_USERS_DATABASE_ID,
+    private readonly invoicesDatabaseId = process.env.NOTION_INVOICES_DATABASE_ID,
+    private readonly boxesDatabaseId = process.env.NOTION_BOXES_DATABASE_ID,
   ) {
     this.client = token ? new Client({ auth: token }) : null;
   }
@@ -434,6 +526,175 @@ export class NotionService {
 
       return null;
     }
+  }
+
+  async listDashboardMovements(
+    range?: NotionDateRangeFilter,
+  ): Promise<DashboardMovement[]> {
+    if (!this.token || !this.movementsDatabaseId) {
+      return [];
+    }
+
+    const filter = range
+      ? {
+          and: [
+            {
+              property: "Data",
+              date: {
+                on_or_after: range.start,
+              },
+            },
+            {
+              property: "Data",
+              date: {
+                before: range.end,
+              },
+            },
+          ],
+        }
+      : undefined;
+
+    const pages = await this.queryDatabasePages(this.movementsDatabaseId, {
+      filter,
+      sorts: [
+        {
+          property: "Data",
+          direction: "descending",
+        },
+      ],
+    });
+
+    return pages.map((page) => {
+      const properties = page.properties ?? {};
+      const title = getTitleContent(properties.Name);
+      const description =
+        getRichTextContent(properties["Descrição"]).trim() ||
+        title.replace(/^(Despesa|Entrada|Caixinha)\s+-\s+/i, "").trim() ||
+        "Sem descrição";
+      const amount = getNumberValue(properties.Valor) ?? 0;
+      const type = mapMovementType(getSelectName(properties.Tipo));
+
+      return {
+        id: page.id,
+        date: getDateStart(properties.Data) ?? "",
+        description,
+        category: getSelectName(properties.Categoria),
+        amount,
+        type,
+        necessityLevel: getSelectName(properties["Nível"]),
+        source: getSelectName(properties.Origem),
+      };
+    });
+  }
+
+  async listDashboardInvoices(): Promise<DashboardInvoice[]> {
+    if (!this.token || !this.invoicesDatabaseId) {
+      return [];
+    }
+
+    const pages = await this.queryDatabasePages(this.invoicesDatabaseId, {
+      sorts: [
+        {
+          property: "Vencimento",
+          direction: "ascending",
+        },
+      ],
+    });
+
+    return pages.map((page) => {
+      const properties = page.properties ?? {};
+
+      return {
+        id: page.id,
+        description:
+          getTitleContent(properties.Name) ||
+          getRichTextContent(properties["Descrição"]) ||
+          "Sem descrição",
+        amount: getNumberValue(properties.Valor) ?? 0,
+        dueDate: getDateStart(properties.Vencimento),
+        status: getSelectName(properties.Status),
+        paidAt: getDateStart(properties["Pago em"]),
+      };
+    });
+  }
+
+  async listDashboardBoxes(): Promise<DashboardBox[]> {
+    if (!this.token || !this.boxesDatabaseId) {
+      return [];
+    }
+
+    const pages = await this.queryDatabasePages(this.boxesDatabaseId, {});
+
+    return pages.map((page) => {
+      const properties = page.properties ?? {};
+      const currentAmount = getNumberValue(properties["Valor atual"]) ?? 0;
+      const targetAmount = getNumberValue(properties.Meta);
+      const progress =
+        targetAmount && targetAmount > 0
+          ? Math.min(100, (currentAmount / targetAmount) * 100)
+          : 0;
+
+      return {
+        id: page.id,
+        name: getTitleContent(properties.Name) || "Caixinha",
+        currentAmount,
+        targetAmount,
+        progress: Number(progress.toFixed(2)),
+      };
+    });
+  }
+
+  private async queryDatabasePages(
+    databaseId: string,
+    body: Record<string, unknown>,
+  ): Promise<NonNullable<NotionQueryResponse["results"]>> {
+    const pages: NonNullable<NotionQueryResponse["results"]> = [];
+    let startCursor: string | undefined;
+
+    do {
+      const response = await fetch(
+        `https://api.notion.com/v1/databases/${databaseId}/query`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json",
+            "Notion-Version": NOTION_VERSION,
+          },
+          body: JSON.stringify({
+            ...body,
+            page_size: 100,
+            ...(startCursor ? { start_cursor: startCursor } : {}),
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+
+        if (isMissingNotionDatabaseError(response.status, errorBody)) {
+          return [];
+        }
+
+        console.error("Failed to query Notion database", {
+          status: response.status,
+          body: errorBody.slice(0, 500),
+        });
+
+        throw new Error("Failed to query Notion database");
+      }
+
+      const data = (await response.json()) as NotionQueryResponse;
+
+      pages.push(...(data.results ?? []));
+      startCursor = data.next_cursor ?? undefined;
+
+      if (!data.has_more) {
+        startCursor = undefined;
+      }
+    } while (startCursor);
+
+    return pages;
   }
 }
 
