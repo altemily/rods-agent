@@ -49,12 +49,15 @@ type NotionWriteResult = {
 };
 
 type NotionQueryResponse = {
-  results?: Array<{
-    id: string;
-    properties?: Record<string, unknown>;
-  }>;
+  results?: NotionPage[];
   has_more?: boolean;
   next_cursor?: string | null;
+};
+
+type NotionPage = {
+  id: string;
+  created_time?: string;
+  properties?: Record<string, unknown>;
 };
 
 type NotionDateRangeFilter = {
@@ -121,6 +124,27 @@ function getRichTextContent(property: unknown): string {
   return "";
 }
 
+function getPlainTextFromItems(items: unknown): string {
+  if (!Array.isArray(items)) {
+    return "";
+  }
+
+  return items
+    .map((item) => {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        "plain_text" in item &&
+        typeof item.plain_text === "string"
+      ) {
+        return item.plain_text;
+      }
+
+      return "";
+    })
+    .join("");
+}
+
 function getTitleContent(property: unknown): string {
   if (
     typeof property === "object" &&
@@ -130,23 +154,61 @@ function getTitleContent(property: unknown): string {
     "title" in property &&
     Array.isArray(property.title)
   ) {
-    return property.title
-      .map((item) => {
-        if (
-          typeof item === "object" &&
-          item !== null &&
-          "plain_text" in item &&
-          typeof item.plain_text === "string"
-        ) {
-          return item.plain_text;
-        }
-
-        return "";
-      })
-      .join("");
+    return getPlainTextFromItems(property.title);
   }
 
   return "";
+}
+
+function getPropertyText(property: unknown): string | null {
+  if (typeof property !== "object" || property === null || !("type" in property)) {
+    return null;
+  }
+
+  if (property.type === "title" && "title" in property) {
+    return getPlainTextFromItems(property.title) || null;
+  }
+
+  if (property.type === "rich_text" && "rich_text" in property) {
+    return getPlainTextFromItems(property.rich_text) || null;
+  }
+
+  if (
+    property.type === "select" &&
+    "select" in property &&
+    property.select &&
+    typeof property.select === "object" &&
+    "name" in property.select &&
+    typeof property.select.name === "string"
+  ) {
+    return property.select.name;
+  }
+
+  if (
+    property.type === "status" &&
+    "status" in property &&
+    property.status &&
+    typeof property.status === "object" &&
+    "name" in property.status &&
+    typeof property.status.name === "string"
+  ) {
+    return property.status.name;
+  }
+
+  if (
+    property.type === "formula" &&
+    "formula" in property &&
+    property.formula &&
+    typeof property.formula === "object" &&
+    "type" in property.formula &&
+    property.formula.type === "string" &&
+    "string" in property.formula &&
+    typeof property.formula.string === "string"
+  ) {
+    return property.formula.string;
+  }
+
+  return null;
 }
 
 function getSelectName(property: unknown): string | null {
@@ -164,7 +226,7 @@ function getSelectName(property: unknown): string | null {
     return property.select.name;
   }
 
-  return null;
+  return getPropertyText(property);
 }
 
 function getNumberValue(property: unknown): number | null {
@@ -177,6 +239,38 @@ function getNumberValue(property: unknown): number | null {
     typeof property.number === "number"
   ) {
     return property.number;
+  }
+
+  if (
+    typeof property === "object" &&
+    property !== null &&
+    "type" in property &&
+    property.type === "formula" &&
+    "formula" in property &&
+    property.formula &&
+    typeof property.formula === "object" &&
+    "type" in property.formula &&
+    property.formula.type === "number" &&
+    "number" in property.formula &&
+    typeof property.formula.number === "number"
+  ) {
+    return property.formula.number;
+  }
+
+  if (
+    typeof property === "object" &&
+    property !== null &&
+    "type" in property &&
+    property.type === "rollup" &&
+    "rollup" in property &&
+    property.rollup &&
+    typeof property.rollup === "object" &&
+    "type" in property.rollup &&
+    property.rollup.type === "number" &&
+    "number" in property.rollup &&
+    typeof property.rollup.number === "number"
+  ) {
+    return property.rollup.number;
   }
 
   return null;
@@ -200,16 +294,173 @@ function getDateStart(property: unknown): string | null {
   return null;
 }
 
-function mapMovementType(typeLabel: string | null): DashboardMovementType {
-  if (typeLabel === "Entrada") {
+function isProduction(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
+function warnInvalidNotionField(
+  section: string,
+  pageId: string,
+  field: string,
+  message: string,
+): void {
+  if (isProduction()) {
+    return;
+  }
+
+  console.warn("Invalid Notion dashboard field normalized", {
+    section,
+    pageId,
+    field,
+    message,
+  });
+}
+
+function normalizeComparableLabel(value: string): string {
+  return value
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function mapMovementType(
+  typeLabel: string | null,
+  pageId: string,
+): DashboardMovementType {
+  if (!typeLabel?.trim()) {
+    warnInvalidNotionField(
+      "movements",
+      pageId,
+      "Tipo",
+      "Missing movement type. Falling back to EXPENSE.",
+    );
+
+    return "EXPENSE";
+  }
+
+  const normalizedLabel = normalizeComparableLabel(typeLabel);
+
+  if (
+    normalizedLabel === "entrada" ||
+    normalizedLabel === "receita" ||
+    normalizedLabel === "income" ||
+    normalizedLabel === "register_income"
+  ) {
     return "INCOME";
   }
 
-  if (typeLabel === "Caixinha") {
+  if (
+    normalizedLabel === "caixinha" ||
+    normalizedLabel === "box_contribution" ||
+    normalizedLabel === "register_box_contribution"
+  ) {
     return "BOX_CONTRIBUTION";
   }
 
+  if (
+    normalizedLabel === "saida" ||
+    normalizedLabel === "despesa" ||
+    normalizedLabel === "expense" ||
+    normalizedLabel === "register_expense"
+  ) {
+    return "EXPENSE";
+  }
+
+  warnInvalidNotionField(
+    "movements",
+    pageId,
+    "Tipo",
+    "Unknown movement type. Falling back to EXPENSE.",
+  );
+
   return "EXPENSE";
+}
+
+function normalizeRequiredString(
+  value: string | null,
+  fallback: string,
+  section: string,
+  pageId: string,
+  field: string,
+): string {
+  const normalizedValue = value?.trim();
+
+  if (normalizedValue) {
+    return normalizedValue;
+  }
+
+  warnInvalidNotionField(
+    section,
+    pageId,
+    field,
+    `Missing text value. Falling back to "${fallback}".`,
+  );
+
+  return fallback;
+}
+
+function normalizeNullableString(value: string | null): string | null {
+  const normalizedValue = value?.trim();
+
+  return normalizedValue || null;
+}
+
+function normalizeNumber(
+  value: number | null,
+  section: string,
+  pageId: string,
+  field: string,
+): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  warnInvalidNotionField(
+    section,
+    pageId,
+    field,
+    "Missing or invalid number. Falling back to 0.",
+  );
+
+  return 0;
+}
+
+function normalizeRequiredDateString(
+  value: string | null,
+  fallback: string | undefined,
+  pageId: string,
+): string {
+  const normalizedValue = value?.trim();
+
+  if (normalizedValue) {
+    return normalizedValue;
+  }
+
+  const normalizedFallback = fallback?.trim();
+
+  if (normalizedFallback) {
+    warnInvalidNotionField(
+      "movements",
+      pageId,
+      "Data",
+      "Missing date. Falling back to page creation date.",
+    );
+
+    return normalizedFallback;
+  }
+
+  warnInvalidNotionField(
+    "movements",
+    pageId,
+    "Data",
+    "Missing date and page creation date. Falling back to current date.",
+  );
+
+  return new Date().toISOString();
 }
 
 function isMissingNotionDatabaseError(status: number, body: string): boolean {
@@ -566,23 +817,41 @@ export class NotionService {
 
     return pages.map((page) => {
       const properties = page.properties ?? {};
-      const title = getTitleContent(properties.Name);
-      const description =
-        getRichTextContent(properties["Descrição"]).trim() ||
-        title.replace(/^(Despesa|Entrada|Caixinha)\s+-\s+/i, "").trim() ||
-        "Sem descrição";
-      const amount = getNumberValue(properties.Valor) ?? 0;
-      const type = mapMovementType(getSelectName(properties.Tipo));
+      const title = normalizeNullableString(getTitleContent(properties.Name));
+      const rawDescription =
+        getPropertyText(properties["Descrição"]) ||
+        title?.replace(/^(Despesa|Entrada|Receita|Saída|Caixinha)\s+-\s+/i, "") ||
+        null;
+      const description = normalizeRequiredString(
+        rawDescription,
+        "Movimentação sem descrição",
+        "movements",
+        page.id,
+        "Descrição",
+      );
+      const amount = normalizeNumber(
+        getNumberValue(properties.Valor),
+        "movements",
+        page.id,
+        "Valor",
+      );
+      const type = mapMovementType(getSelectName(properties.Tipo), page.id);
 
       return {
         id: page.id,
-        date: getDateStart(properties.Data) ?? "",
+        date: normalizeRequiredDateString(
+          getDateStart(properties.Data),
+          page.created_time,
+          page.id,
+        ),
         description,
-        category: getSelectName(properties.Categoria),
+        category: normalizeNullableString(getSelectName(properties.Categoria)),
         amount,
         type,
-        necessityLevel: getSelectName(properties["Nível"]),
-        source: getSelectName(properties.Origem),
+        necessityLevel: normalizeNullableString(
+          getSelectName(properties["Nível"]),
+        ),
+        source: normalizeNullableString(getSelectName(properties.Origem)),
       };
     });
   }
@@ -606,13 +875,22 @@ export class NotionService {
 
       return {
         id: page.id,
-        description:
-          getTitleContent(properties.Name) ||
-          getRichTextContent(properties["Descrição"]) ||
-          "Sem descrição",
-        amount: getNumberValue(properties.Valor) ?? 0,
+        description: normalizeRequiredString(
+          getPropertyText(properties.Name) ||
+            getPropertyText(properties["Descrição"]),
+          "Fatura sem descrição",
+          "invoices",
+          page.id,
+          "Descrição",
+        ),
+        amount: normalizeNumber(
+          getNumberValue(properties.Valor),
+          "invoices",
+          page.id,
+          "Valor",
+        ),
         dueDate: getDateStart(properties.Vencimento),
-        status: getSelectName(properties.Status),
+        status: normalizeNullableString(getSelectName(properties.Status)),
         paidAt: getDateStart(properties["Pago em"]),
       };
     });
@@ -627,8 +905,17 @@ export class NotionService {
 
     return pages.map((page) => {
       const properties = page.properties ?? {};
-      const currentAmount = getNumberValue(properties["Valor atual"]) ?? 0;
-      const targetAmount = getNumberValue(properties.Meta);
+      const currentAmount = normalizeNumber(
+        getNumberValue(properties["Valor atual"]),
+        "boxes",
+        page.id,
+        "Valor atual",
+      );
+      const rawTargetAmount = getNumberValue(properties.Meta);
+      const targetAmount =
+        rawTargetAmount === null
+          ? null
+          : normalizeNumber(rawTargetAmount, "boxes", page.id, "Meta");
       const progress =
         targetAmount && targetAmount > 0
           ? Math.min(100, (currentAmount / targetAmount) * 100)
@@ -636,7 +923,13 @@ export class NotionService {
 
       return {
         id: page.id,
-        name: getTitleContent(properties.Name) || "Caixinha",
+        name: normalizeRequiredString(
+          getPropertyText(properties.Name),
+          "Caixinha",
+          "boxes",
+          page.id,
+          "Name",
+        ),
         currentAmount,
         targetAmount,
         progress: Number(progress.toFixed(2)),
