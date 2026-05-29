@@ -1,4 +1,5 @@
 import { notionService } from "../src/services/notion.service";
+import { performance } from "node:perf_hooks";
 import type {
   DashboardApiRequest,
   DashboardApiResponse,
@@ -16,6 +17,110 @@ import type {
 
 const COMPETENCE_PATTERN = /^\d{4}-\d{2}$/;
 const DASHBOARD_TIME_ZONE = "America/Fortaleza";
+const DASHBOARD_CACHE_TTL_MS = 60_000;
+
+type DashboardCacheEntry = {
+  expiresAt: number;
+  payload: DashboardPayload;
+};
+
+type DashboardPerformanceMetrics = {
+  sessionValidationMs?: number;
+  cacheLookupMs?: number;
+  movementsReadMs?: number;
+  historyMovementsReadMs?: number;
+  invoicesReadMs?: number;
+  boxesReadMs?: number;
+  payloadBuildMs?: number;
+  totalMs?: number;
+  cacheHit?: boolean;
+  invoicesSkipped?: boolean;
+  boxesSkipped?: boolean;
+};
+
+const dashboardCache = new Map<string, DashboardCacheEntry>();
+
+function isProduction(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
+function isPerformanceLogEnabled(): boolean {
+  return !isProduction();
+}
+
+function isDashboardCacheDisabled(): boolean {
+  return process.env.DASHBOARD_CACHE_DISABLED === "true";
+}
+
+function getDashboardCacheKey(competence: string): string {
+  return `dashboard:${competence}`;
+}
+
+function getCachedDashboardPayload(competence: string): DashboardPayload | null {
+  if (isDashboardCacheDisabled()) {
+    return null;
+  }
+
+  const cacheKey = getDashboardCacheKey(competence);
+  const cached = dashboardCache.get(cacheKey);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    dashboardCache.delete(cacheKey);
+
+    return null;
+  }
+
+  return cached.payload;
+}
+
+function setCachedDashboardPayload(
+  competence: string,
+  payload: DashboardPayload,
+): void {
+  if (isDashboardCacheDisabled()) {
+    return;
+  }
+
+  dashboardCache.set(getDashboardCacheKey(competence), {
+    expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS,
+    payload,
+  });
+}
+
+function logDashboardPerformance(
+  competence: string,
+  metrics: DashboardPerformanceMetrics,
+): void {
+  if (!isPerformanceLogEnabled()) {
+    return;
+  }
+
+  console.info("Dashboard performance", {
+    competence,
+    cacheDisabled: isDashboardCacheDisabled(),
+    ...metrics,
+  });
+}
+
+async function measureAsync<T>(
+  setMetric: (durationMs: number) => void,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+
+  try {
+    return await operation();
+  } finally {
+    setMetric(Number((performance.now() - start).toFixed(2)));
+  }
+}
 
 function getCurrentCompetence(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -210,6 +315,9 @@ export default async function handler(
   req: DashboardApiRequest,
   res: DashboardApiResponse,
 ) {
+  const endpointStart = performance.now();
+  const metrics: DashboardPerformanceMetrics = {};
+
   setCorsHeaders(res, req, "GET, OPTIONS");
 
   if (req.method === "OPTIONS") {
@@ -221,7 +329,16 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  if (!isDashboardSessionValid(req)) {
+  const sessionValidationStart = performance.now();
+  const isAuthenticated = isDashboardSessionValid(req);
+  metrics.sessionValidationMs = Number(
+    (performance.now() - sessionValidationStart).toFixed(2),
+  );
+
+  if (!isAuthenticated) {
+    metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+    logDashboardPerformance("unauthenticated", metrics);
+
     return res.status(401).json({
       message: "Não autenticado.",
     });
@@ -231,26 +348,80 @@ export default async function handler(
     getQueryValue(req.query?.competence) ?? getCurrentCompetence();
 
   if (!validateCompetence(competence)) {
+    metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+    logDashboardPerformance(competence, metrics);
+
     return res.status(400).json({
       error: "Invalid competence. Use YYYY-MM.",
     });
   }
 
   if (!process.env.NOTION_TOKEN) {
+    metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+    logDashboardPerformance(competence, metrics);
+
     return res.status(500).json({
       error: "Dashboard integration is not configured",
     });
   }
 
   try {
+    const cacheLookupStart = performance.now();
+    const cachedPayload = getCachedDashboardPayload(competence);
+    metrics.cacheLookupMs = Number(
+      (performance.now() - cacheLookupStart).toFixed(2),
+    );
+
+    if (cachedPayload) {
+      metrics.cacheHit = true;
+      metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+      logDashboardPerformance(competence, metrics);
+
+      return res.status(200).json(cachedPayload);
+    }
+
+    metrics.cacheHit = false;
+
     const range = getCompetenceRange(competence);
     const historyRange = getHistoryRange(competence);
+    const invoicesPromise = process.env.NOTION_INVOICES_DATABASE_ID
+      ? measureAsync(
+          (durationMs) => {
+            metrics.invoicesReadMs = durationMs;
+          },
+          () => notionService.listDashboardInvoices(),
+        )
+      : Promise.resolve([]);
+    const boxesPromise = process.env.NOTION_BOXES_DATABASE_ID
+      ? measureAsync(
+          (durationMs) => {
+            metrics.boxesReadMs = durationMs;
+          },
+          () => notionService.listDashboardBoxes(),
+        )
+      : Promise.resolve([]);
+
+    metrics.invoicesSkipped = !process.env.NOTION_INVOICES_DATABASE_ID;
+    metrics.boxesSkipped = !process.env.NOTION_BOXES_DATABASE_ID;
+
     const [movements, invoices, boxes, historyMovements] = await Promise.all([
-      notionService.listDashboardMovements(range),
-      notionService.listDashboardInvoices(),
-      notionService.listDashboardBoxes(),
-      notionService.listDashboardMovements(historyRange),
+      measureAsync(
+        (durationMs) => {
+          metrics.movementsReadMs = durationMs;
+        },
+        () => notionService.listDashboardMovements(range),
+      ),
+      invoicesPromise,
+      boxesPromise,
+      measureAsync(
+        (durationMs) => {
+          metrics.historyMovementsReadMs = durationMs;
+        },
+        () => notionService.listDashboardMovements(historyRange),
+      ),
     ]);
+
+    const payloadBuildStart = performance.now();
     const summary = calculateSummary(movements);
     const payload: DashboardPayload = {
       competence,
@@ -262,10 +433,20 @@ export default async function handler(
       alerts: buildAlerts(summary),
       history: calculateHistory(historyMovements),
     };
+    metrics.payloadBuildMs = Number(
+      (performance.now() - payloadBuildStart).toFixed(2),
+    );
+
+    setCachedDashboardPayload(competence, payload);
+
+    metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+    logDashboardPerformance(competence, metrics);
 
     return res.status(200).json(payload);
   } catch (error) {
     console.error("Failed to build dashboard payload", error);
+    metrics.totalMs = Number((performance.now() - endpointStart).toFixed(2));
+    logDashboardPerformance(competence, metrics);
 
     return res.status(502).json({
       error: "Failed to load dashboard data",
