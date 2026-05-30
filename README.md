@@ -301,6 +301,7 @@ Esses níveis ajudam o agente a ajustar o tom da resposta e identificar quando u
 | `/start` | Inicia o fluxo do bot. |
 | `/reset` | Reinicia o estado local da conversa. |
 | `/status` | Mostra o status atual do usuário no fluxo. |
+| `/me` | Mostra o Telegram User ID e o nome reconhecido pela configuração. |
 | `/devseed` | Carrega um perfil de teste para facilitar validações durante o desenvolvimento. |
 
 ### Observação sobre `/devseed`
@@ -326,13 +327,45 @@ Exemplo:
 
 ```env
 TELEGRAM_BOT_TOKEN=
+ALLOWED_TELEGRAM_USERS={"123456789":"Ariane","987654321":"Alex"}
 GEMINI_API_KEY=
 GEMINI_MODEL=
 NOTION_TOKEN=
 NOTION_MOVEMENTS_DATABASE_ID=
 ```
 
+`ALLOWED_TELEGRAM_USERS` relaciona cada Telegram User ID autorizado ao nome
+salvo nas movimentações. Se ela não existir, `TELEGRAM_ALLOWED_USER_IDS`
+continua aceito como fallback compatível, com IDs separados por vírgula.
+
+As movimentações usam as colunas principais já existentes e tentam preencher
+também `Usuário`, `Parcela`, `Parcela Atual`, `Total de Parcelas` e
+`Grupo/Contrato`. Esses campos extras podem ser adicionados gradualmente à base
+do Notion sem impedir o registro principal.
+
 > Nunca versionar tokens reais, chaves de API ou dados sensíveis.
+
+---
+
+## Sincronização do schema do Notion
+
+Para verificar as propriedades da base de movimentações sem fazer alterações:
+
+```bash
+npm run notion:sync-schema -- --dry-run
+```
+
+Depois de revisar a saída, aplique somente as propriedades e opções ausentes:
+
+```bash
+npm run notion:sync-schema
+```
+
+O script carrega `.env.local` e usa `.env` como fallback. Ele não cria páginas,
+não apaga propriedades e não remove opções antigas de `select`. Se uma
+propriedade já existir com tipo incompatível, a execução para antes de alterar o
+schema. `NOTION_MOVEMENTS_DATA_SOURCE_ID` só precisa ser configurado se a
+database de movimentações possuir mais de um data source.
 
 ---
 

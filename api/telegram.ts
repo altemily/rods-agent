@@ -1,4 +1,5 @@
 import { RodsAgent } from "../src/agent/rodsAgent";
+import { resolveTelegramUser } from "../src/config/telegramUsers";
 import { TelegramService } from "../src/services/telegram.service";
 
 type VercelRequest = {
@@ -47,35 +48,6 @@ function parseTelegramUpdate(body: unknown): ParsedTelegramUpdate {
   return { chatId, userId, text };
 }
 
-function getAllowedTelegramUserIds(): Set<string> {
-  const rawAllowedIds = process.env.TELEGRAM_ALLOWED_USER_IDS ?? "";
-
-  return new Set(
-    rawAllowedIds
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean),
-  );
-}
-
-function isAuthorizedTelegramUser(userId: string | undefined): boolean {
-  if (!userId) {
-    return false;
-  }
-
-  const allowedUserIds = getAllowedTelegramUserIds();
-
-  if (allowedUserIds.size === 0) {
-    console.error(
-      "TELEGRAM_ALLOWED_USER_IDS não configurado. Bloqueando acesso por segurança.",
-    );
-
-    return false;
-  }
-
-  return allowedUserIds.has(userId);
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -88,11 +60,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true, ignored: true });
   }
 
-  if (!isAuthorizedTelegramUser(userId)) {
+  const telegramUser = resolveTelegramUser(userId);
+
+  if (!telegramUser) {
     console.warn("Tentativa de acesso não autorizado ao bot.", {
       chatId,
       userId,
     });
+
+    try {
+      const telegramService = new TelegramService();
+      await telegramService.sendMessage(
+        chatId,
+        "Este bot é de uso privado. Seu usuário não está autorizado.",
+      );
+    } catch {
+      console.error("Não foi possível enviar a mensagem de acesso bloqueado.");
+    }
 
     return res.status(200).json({
       ok: true,
@@ -103,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const telegramService = new TelegramService();
-    const responseMessage = await rodsAgent.respond(chatId, text);
+    const responseMessage = await rodsAgent.respond(chatId, text, telegramUser);
 
     await telegramService.sendMessage(chatId, responseMessage);
   } catch {

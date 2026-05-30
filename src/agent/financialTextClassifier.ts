@@ -90,6 +90,10 @@ function buildPrompt(message: string): string {
     '  "category": string | null,',
     '  "necessityLevel": "ESSENTIAL" | "NECESSARY" | "OPTIONAL" | "IMPULSIVE" | null,',
     '  "boxName": string | null,',
+    '  "installmentLabel": string | null,',
+    '  "installmentCurrent": number | null,',
+    '  "installmentTotal": number | null,',
+    '  "contractName": string | null,',
     '  "confidence": number,',
     '  "needsConfirmation": boolean,',
     '  "clarificationQuestion": string | null',
@@ -104,6 +108,13 @@ function buildPrompt(message: string): string {
     "- NECESSARY: algo util, mas nao vital.",
     "- OPTIONAL: lazer, conforto, compra nao essencial.",
     "- IMPULSIVE: compra emocional, delivery recorrente, compra por impulso, superfluo evidente.",
+    "- Categoria Pets: racao, pet shop, veterinario, banho e tosa, remedio ou vacina de pet, brinquedos, acessorios, areia de gato e gastos com animais.",
+    "- Categoria Dividas / Limpar Nome: acordos, divida antiga, SPC, Serasa, nome negativado, limpar nome, renegociacao e quitacao de pendencias.",
+    "- Categoria Emprestimo: parcelas de emprestimos pessoais, bancarios, aplicativos de credito ou similares.",
+    "- Categoria Consorcio / Financiamento: parcelas de consorcio ou financiamento de moto, carro, imovel ou bens por contrato.",
+    "- Identifique parcelas em formatos como 01/12, 1/12, parcela 1 de 12, primeira de 12 ou paguei a parcela 3/10.",
+    "- installmentLabel preserva o trecho da parcela, installmentCurrent e installmentTotal usam numeros.",
+    "- contractName identifica o acordo ou contrato quando houver, como emprestimo Nubank, consorcio da moto ou acordo Serasa.",
     "- Use null quando nao houver informacao suficiente.",
     "- Marque needsConfirmation como true quando faltar valor, descricao, categoria essencial para registrar, ou quando houver ambiguidade.",
     "",
@@ -205,6 +216,22 @@ function parseAmount(value: string): number {
 }
 
 function inferFallbackCategory(normalizedMessage: string): string {
+  if (/racao|pet shop|petshop|veterinari|banho e tosa|remedio (?:de |do )?pet|vacina (?:de |do )?pet|areia de gato|animal/.test(normalizedMessage)) {
+    return "Pets";
+  }
+
+  if (/acordo|divida antiga|spc|serasa|nome negativado|limpar (?:o )?nome|renegoci|quitacao de pendencia/.test(normalizedMessage)) {
+    return "Dívidas / Limpar Nome";
+  }
+
+  if (/emprestimo|credito pessoal/.test(normalizedMessage)) {
+    return "Empréstimo";
+  }
+
+  if (/consorcio|financiamento/.test(normalizedMessage)) {
+    return "Consórcio / Financiamento";
+  }
+
   if (/mercado|supermercado|feira|alimentacao|comida/.test(normalizedMessage)) {
     return "Alimentação";
   }
@@ -228,7 +255,92 @@ function inferFallbackCategory(normalizedMessage: string): string {
   return "Outros";
 }
 
+function parseInstallment(message: string): {
+  installmentLabel: string | null;
+  installmentCurrent: number | null;
+  installmentTotal: number | null;
+} {
+  const numericMatch = message.match(
+    /\b(?:parcela\s*)?(\d{1,3})\s*\/\s*(\d{1,3})\b/i,
+  );
+  const textMatch = message.match(
+    /\b(?:parcela\s*)?(\d{1,3})\s+de\s+(\d{1,3})\b/i,
+  );
+  const ordinalMatch = message.match(
+    /\b(primeira|segunda|terceira|quarta|quinta|sexta|setima|oitava|nona|decima)\s+de\s+(\d{1,3})\b/i,
+  );
+  const ordinalValues: Record<string, number> = {
+    primeira: 1,
+    segunda: 2,
+    terceira: 3,
+    quarta: 4,
+    quinta: 5,
+    sexta: 6,
+    setima: 7,
+    oitava: 8,
+    nona: 9,
+    decima: 10,
+  };
+
+  if (numericMatch?.[1] && numericMatch[2]) {
+    return {
+      installmentLabel: numericMatch[0],
+      installmentCurrent: Number(numericMatch[1]),
+      installmentTotal: Number(numericMatch[2]),
+    };
+  }
+
+  if (textMatch?.[1] && textMatch[2]) {
+    return {
+      installmentLabel: textMatch[0],
+      installmentCurrent: Number(textMatch[1]),
+      installmentTotal: Number(textMatch[2]),
+    };
+  }
+
+  if (ordinalMatch?.[1] && ordinalMatch[2]) {
+    return {
+      installmentLabel: ordinalMatch[0],
+      installmentCurrent: ordinalValues[normalizeText(ordinalMatch[1])] ?? null,
+      installmentTotal: Number(ordinalMatch[2]),
+    };
+  }
+
+  return {
+    installmentLabel: null,
+    installmentCurrent: null,
+    installmentTotal: null,
+  };
+}
+
+function inferContractName(message: string): string | null {
+  const match = message.match(
+    /\b(emprestimo|empréstimo|consorcio|consórcio|financiamento|acordo)\b[^,.;]*/i,
+  );
+
+  if (!match?.[0]) {
+    return null;
+  }
+
+  return match[0]
+    .replace(/\s+\b(?:parcela\s*)?\d{1,3}\s*\/\s*\d{1,3}\b.*$/i, "")
+    .replace(/\s+\b(?:parcela\s*)?\d{1,3}\s+de\s+\d{1,3}\b.*$/i, "")
+    .trim();
+}
+
 function inferFallbackNecessityLevel(normalizedMessage: string): FinancialTextClassification["necessityLevel"] {
+  if (/veterinari|remedio (?:de |do )?pet|vacina (?:de |do )?pet/.test(normalizedMessage)) {
+    return "ESSENTIAL";
+  }
+
+  if (/emprestimo|credito pessoal|consorcio|financiamento|acordo|divida antiga|spc|serasa|nome negativado|limpar (?:o )?nome|renegoci|quitacao de pendencia/.test(normalizedMessage)) {
+    return "NECESSARY";
+  }
+
+  if (/racao|pet shop|petshop|banho e tosa|areia de gato|animal/.test(normalizedMessage)) {
+    return "NECESSARY";
+  }
+
   if (/mercado|supermercado|feira|remedio|farmacia|aluguel|energia|agua|internet/.test(normalizedMessage)) {
     return "ESSENTIAL";
   }
@@ -258,6 +370,7 @@ function buildFallbackClassification(message: string): FinancialTextClassificati
   }
 
   const normalizedMessage = normalizeText(message);
+  const installment = parseInstallment(message);
 
   const isBoxContribution = /caixinha|reserva|investimento|investi|guardei|poupei/.test(normalizedMessage);
 
@@ -288,6 +401,8 @@ function buildFallbackClassification(message: string): FinancialTextClassificati
     category: inferFallbackCategory(normalizedMessage),
     necessityLevel: intent === "REGISTER_EXPENSE" ? inferFallbackNecessityLevel(normalizedMessage) : null,
     boxName: intent === "REGISTER_BOX_CONTRIBUTION" ? description : null,
+    ...installment,
+    contractName: inferContractName(message),
     confidence: 0.8,
     needsConfirmation: false,
     clarificationQuestion: null,

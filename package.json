@@ -6,7 +6,8 @@
   "scripts": {
     "vercel:dev": "vercel dev",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck"
+    "check": "npm run typecheck",
+    "notion:sync-schema": "tsx scripts/syncNotionSchema.ts"
   },
   "repository": {
     "type": "git",

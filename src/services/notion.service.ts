@@ -20,6 +20,7 @@ type NecessityLevel =
 
 type CreateMovementInput = {
   telegramUserId: string | number;
+  userName: string;
   intent: MovementIntent;
   amount: number;
   description: string | null;
@@ -27,6 +28,10 @@ type CreateMovementInput = {
   necessityLevel: NecessityLevel;
   boxName: string | null;
   source: "TEXT";
+  installmentLabel: string | null;
+  installmentCurrent: number | null;
+  installmentTotal: number | null;
+  contractName: string | null;
 };
 
 type SaveUserProfileInput = {
@@ -583,6 +588,8 @@ export class NotionService {
         },
       });
 
+      await this.updateOptionalMovementProperties(page.id, input);
+
       return {
         success: true,
         pageId: page.id,
@@ -594,6 +601,95 @@ export class NotionService {
         success: false,
         error: "Failed to create Notion movement",
       };
+    }
+  }
+
+  private async updateOptionalMovementProperties(
+    pageId: string,
+    input: CreateMovementInput,
+  ): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+
+    const optionalProperties = [
+      {
+        name: "Usuário",
+        value: {
+          select: {
+            name: input.userName,
+          },
+        },
+      },
+      ...(input.installmentLabel
+        ? [
+            {
+              name: "Parcela",
+              value: {
+                rich_text: [
+                  {
+                    text: {
+                      content: input.installmentLabel,
+                    },
+                  },
+                ],
+              },
+            },
+          ]
+        : []),
+      ...(input.installmentCurrent !== null
+        ? [
+            {
+              name: "Parcela Atual",
+              value: {
+                number: input.installmentCurrent,
+              },
+            },
+          ]
+        : []),
+      ...(input.installmentTotal !== null
+        ? [
+            {
+              name: "Total de Parcelas",
+              value: {
+                number: input.installmentTotal,
+              },
+            },
+          ]
+        : []),
+      ...(input.contractName?.trim()
+        ? [
+            {
+              name: "Grupo/Contrato",
+              value: {
+                rich_text: [
+                  {
+                    text: {
+                      content: input.contractName.trim(),
+                    },
+                  },
+                ],
+              },
+            },
+          ]
+        : []),
+    ];
+
+    for (const property of optionalProperties) {
+      try {
+        await this.client.pages.update({
+          page_id: pageId,
+          properties: {
+            [property.name]: property.value,
+          },
+        });
+      } catch (error) {
+        console.warn("Optional Notion movement property was not saved", {
+          pageId,
+          property: property.name,
+          error,
+        });
+      }
     }
   }
 

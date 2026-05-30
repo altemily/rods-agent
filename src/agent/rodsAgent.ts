@@ -6,6 +6,7 @@ import {
 } from "../services/notion.service";
 import { ContextualRoastGenerator } from "./contextualRoastGenerator";
 import type { FinancialTextClassification } from "./schemas";
+import type { TelegramUser } from "../config/telegramUsers";
 
 type PersistableFinancialClassification = FinancialTextClassification & {
   intent:
@@ -24,33 +25,45 @@ export class RodsAgent {
     private readonly contextualRoastGenerator = new ContextualRoastGenerator(),
   ) {}
 
-  async respond(chatId: string | number, message: string): Promise<string> {
+  async respond(
+    chatId: string | number,
+    message: string,
+    telegramUser: TelegramUser = {
+      id: String(chatId),
+      name: String(chatId),
+    },
+  ): Promise<string> {
+    const userId = telegramUser.id;
     const normalizedMessage = message.trim();
     const command = normalizedMessage.toLowerCase();
 
+    if (command === "/me") {
+      return `Telegram User ID: ${userId}\nUsuário reconhecido: ${telegramUser.name}`;
+    }
+
     if (command === "/start") {
-      await this.ensureCompletedProfileLoaded(chatId);
+      await this.ensureCompletedProfileLoaded(userId);
 
-      const response = this.onboardingAgent.start(chatId);
+      const response = this.onboardingAgent.start(userId);
 
-      if (!this.onboardingAgent.isCompleted(chatId)) {
-        await this.persistStartedProfile(chatId);
+      if (!this.onboardingAgent.isCompleted(userId)) {
+        await this.persistStartedProfile(userId);
       }
 
       return response;
     }
 
     if (command === "/reset") {
-      const response = this.onboardingAgent.reset(chatId);
-      await this.persistStartedProfile(chatId);
+      const response = this.onboardingAgent.reset(userId);
+      await this.persistStartedProfile(userId);
 
       return response;
     }
 
     if (command === "/status") {
-      await this.ensureCompletedProfileLoaded(chatId);
+      await this.ensureCompletedProfileLoaded(userId);
 
-      return this.onboardingAgent.getStatus(chatId);
+      return this.onboardingAgent.getStatus(userId);
     }
 
     if (command === "/devseed") {
@@ -58,22 +71,22 @@ export class RodsAgent {
         return "Comando de desenvolvimento desativado neste ambiente.";
       }
 
-      const response = this.onboardingAgent.seedCompletedProfile(chatId);
-      await this.persistCompletedProfile(chatId);
+      const response = this.onboardingAgent.seedCompletedProfile(userId);
+      await this.persistCompletedProfile(userId);
 
       return response;
     }
 
-    await this.ensureCompletedProfileLoaded(chatId);
+    await this.ensureCompletedProfileLoaded(userId);
 
-    if (!this.onboardingAgent.isCompleted(chatId)) {
+    if (!this.onboardingAgent.isCompleted(userId)) {
       const response = this.onboardingAgent.handleMessage(
-        chatId,
+        userId,
         normalizedMessage,
       );
 
-      if (this.onboardingAgent.isCompleted(chatId)) {
-        await this.persistCompletedProfile(chatId);
+      if (this.onboardingAgent.isCompleted(userId)) {
+        await this.persistCompletedProfile(userId);
       }
 
       return response;
@@ -98,7 +111,8 @@ export class RodsAgent {
     }
 
     const notionResult = await this.notionService.createMovement({
-      telegramUserId: chatId,
+      telegramUserId: userId,
+      userName: telegramUser.name,
       intent: result.classification.intent,
       amount: result.classification.amount,
       description: result.classification.description,
@@ -106,9 +120,13 @@ export class RodsAgent {
       necessityLevel: result.classification.necessityLevel,
       boxName: result.classification.boxName,
       source: "TEXT",
+      installmentLabel: result.classification.installmentLabel,
+      installmentCurrent: result.classification.installmentCurrent,
+      installmentTotal: result.classification.installmentTotal,
+      contractName: result.classification.contractName,
     });
 
-    const profile = this.onboardingAgent.getCompletedProfile(chatId);
+    const profile = this.onboardingAgent.getCompletedProfile(userId);
 
     if (!profile) {
       return this.formatClassificationPreview(
@@ -214,6 +232,7 @@ export class RodsAgent {
       `Descrição: ${classification.description ?? "não informada"}`,
       `Categoria: ${classification.category ?? "não informada"}`,
       `Nível: ${this.formatNecessityLevel(classification.necessityLevel)}`,
+      ...this.formatInstallment(classification),
       notionSaved
         ? "Status: registrado no Notion."
         : "Status: classificação feita, mas o registro no Notion não foi concluído.",
@@ -234,6 +253,7 @@ export class RodsAgent {
       `Valor: ${this.formatAmount(classification.amount)}`,
       `Categoria: ${classification.category ?? "não informada"}`,
       `Nível: ${this.formatNecessityLevel(classification.necessityLevel)}`,
+      ...this.formatInstallment(classification),
       "",
       "RODS:",
       roast,
@@ -277,5 +297,22 @@ export class RodsAgent {
       style: "currency",
       currency: "BRL",
     }).format(amount);
+  }
+
+  private formatInstallment(
+    classification: FinancialTextClassification,
+  ): string[] {
+    if (!classification.installmentLabel && !classification.contractName) {
+      return [];
+    }
+
+    return [
+      ...(classification.installmentLabel
+        ? [`Parcela: ${classification.installmentLabel}`]
+        : []),
+      ...(classification.contractName
+        ? [`Grupo/Contrato: ${classification.contractName}`]
+        : []),
+    ];
   }
 }
