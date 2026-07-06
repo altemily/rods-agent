@@ -8,7 +8,8 @@ export const RODS_SYSTEM_PROMPT = [
 type BuildContextualRoastPromptInput = {
   profile: CompletedOnboardingProfile;
   classification: FinancialTextClassification;
-  notionSaved: boolean;
+  persistenceSaved: boolean;
+  persistenceTarget: string;
 };
 
 export function buildContextualRoastPrompt(input: BuildContextualRoastPromptInput): string {
@@ -46,6 +47,7 @@ export function buildContextualRoastPrompt(input: BuildContextualRoastPromptInpu
     "",
     `Perfil concluido do onboarding: ${JSON.stringify(input.profile)}`,
     `Classificacao da movimentacao: ${JSON.stringify(input.classification)}`,
-    `Status do registro no Notion: ${input.notionSaved ? "registrado" : "nao registrado"}`,
+    `Destino principal do registro: ${input.persistenceTarget}`,
+    `Status do registro: ${input.persistenceSaved ? "registrado" : "nao registrado"}`,
   ].join("\n");
 }

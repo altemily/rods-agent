@@ -19,7 +19,7 @@ Nesta versão, o sistema funciona como um bot integrado ao Telegram, capaz de:
 - iniciar um fluxo de onboarding;
 - interpretar mensagens financeiras em texto;
 - classificar movimentações com apoio de LLM;
-- registrar movimentações no Notion;
+- registrar movimentações financeiras no Supabase;
 - responder ao usuário com um tom crítico, educativo e sarcástico controlado.
 
 ---
@@ -36,7 +36,7 @@ Esta é uma versão inicial funcional do agente.
 - Onboarding conversacional.
 - Classificação de mensagens financeiras com Gemini.
 - Validação estrutural dos dados classificados.
-- Registro de movimentações financeiras no Notion.
+- Registro de movimentações financeiras no Supabase.
 - Ferramentas separadas para registro de:
   - despesas;
   - receitas;
@@ -65,7 +65,7 @@ Algumas ideias fazem parte da proposta conceitual do sistema, mas não foram tra
 - **Vercel Serverless Functions**
 - **Telegram Bot API**
 - **Gemini API**
-- **Notion API**
+- **Supabase**
 - **Zod**
 
 ---
@@ -88,7 +88,7 @@ RODS-AGENT
 │   │
 │   ├── services
 │   │   ├── gemini.service.ts
-│   │   ├── notion.service.ts
+│   │   ├── supabaseMovement.service.ts
 │   │   └── telegram.service.ts
 │   │
 │   ├── tools
@@ -125,9 +125,9 @@ RodsAgent
   ├── ContextualRoastGenerator
   └── Tools
          ↓
-      NotionService
+      SupabaseMovementService
          ↓
-       Notion
+      Supabase
 ```
 
 ---
@@ -190,11 +190,19 @@ Serviço responsável pela comunicação com a API do Gemini.
 
 ---
 
-### `src/services/notion.service.ts`
+### `src/services/supabaseMovement.service.ts`
 
-Serviço responsável pela comunicação com o Notion.
+Serviço server-side responsável por gravar movimentações financeiras no Supabase usando `SUPABASE_SERVICE_ROLE_KEY`.
 
-Nesta versão, o Notion é utilizado para registrar as movimentações financeiras processadas pelo agente.
+Ele resolve:
+
+- usuário em `app_users`;
+- categoria em `categories`;
+- método de pagamento em `payment_methods`;
+- caixinha em `boxes`, quando a intenção é `REGISTER_BOX_CONTRIBUTION`;
+- escrita principal em `movements`;
+- escrita complementar em `box_movements` para aportes de caixinha.
+- atualização de `boxes.current_amount_cents` após aportes de caixinha.
 
 ---
 
@@ -246,7 +254,7 @@ Ferramenta responsável por registrar contribuições para caixinhas ou objetivo
    - registrar receita;
    - registrar contribuição para caixinha.
 
-10. A movimentação é registrada no Notion.
+10. A movimentação é registrada no Supabase.
 
 11. O agente retorna uma resposta contextualizada ao usuário.
 ```
@@ -312,7 +320,7 @@ Ele existe para facilitar testes do fluxo de movimentações sem precisar refaze
 Nesta versão:
 
 - usa memória local;
-- não persiste o onboarding completo no Notion;
+- não persiste o onboarding completo em banco;
 - não substitui uma persistência real de perfil;
 - pode ser removido ou alterado em versões futuras.
 
@@ -326,13 +334,41 @@ Exemplo:
 
 ```env
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_IDS=
 GEMINI_API_KEY=
 GEMINI_MODEL=
-NOTION_TOKEN=
-NOTION_MOVEMENTS_DATABASE_ID=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_TELEGRAM_USER_KEY_MAP=
 ```
 
 > Nunca versionar tokens reais, chaves de API ou dados sensíveis.
+
+### Variáveis do Telegram
+
+- `TELEGRAM_BOT_TOKEN`: token do bot usado para enviar respostas.
+- `TELEGRAM_ALLOWED_USER_IDS`: lista de Telegram user ids autorizados, separados por vírgula. O webhook bloqueia mensagens quando essa variável está vazia.
+- `TELEGRAM_WEBHOOK_SECRET`: reservado para configuração/validação de webhook quando aplicável.
+
+### Variáveis do Supabase
+
+- `SUPABASE_URL`: URL do projeto Supabase.
+- `SUPABASE_SERVICE_ROLE_KEY`: service role key usada apenas no backend/agent para escrita. Não exponha essa chave em frontend.
+- `SUPABASE_TELEGRAM_USER_KEY_MAP`: fallback opcional para mapear Telegram user id para `app_users.user_key` quando a tabela ainda não tiver `telegram_user_id`.
+
+Formato aceito para `SUPABASE_TELEGRAM_USER_KEY_MAP`:
+
+```env
+SUPABASE_TELEGRAM_USER_KEY_MAP={"123456789":"ariane","987654321":"alex"}
+```
+
+ou:
+
+```env
+SUPABASE_TELEGRAM_USER_KEY_MAP=123456789:ariane,987654321:alex
+```
+
+O resolvedor tenta primeiro `app_users.telegram_user_id`. Se não encontrar, tenta o mapa acima por `app_users.user_key`. Se nenhum mapeamento existir, a movimentação falha com erro claro no log.
 
 ---
 
@@ -363,7 +399,7 @@ npm install
 Para rodar o projeto localmente com ambiente serverless da Vercel:
 
 ```bash
-npx vercel dev
+npm run vercel:dev
 ```
 
 O endpoint principal do bot está em:
@@ -384,6 +420,14 @@ npm run check
 
 Esse comando deve ser utilizado antes de subir alterações para a branch principal.
 
+Scripts disponíveis neste repositório:
+
+- `npm run vercel:dev`
+- `npm run typecheck`
+- `npm run check`
+
+Não há scripts `lint`, `build` ou `test` configurados no `package.json` neste momento.
+
 ---
 
 ## Teste manual sugerido
@@ -395,7 +439,7 @@ Depois de iniciar o projeto localmente, valide o fluxo principal:
 2. Passar pelo onboarding ou usar /devseed.
 3. Enviar uma movimentação financeira em texto.
 4. Verificar se o agente respondeu corretamente.
-5. Conferir se a movimentação foi registrada no Notion.
+5. Conferir se a movimentação foi registrada no Supabase.
 6. Testar /status.
 7. Testar /reset.
 ```
@@ -409,8 +453,44 @@ gastei 32 reais com lanche
 Resultado esperado:
 
 ```txt
-O agente deve identificar a mensagem como despesa, classificar os dados principais, registrar a movimentação no Notion e responder ao usuário com feedback contextualizado.
+O agente deve identificar a mensagem como despesa, classificar os dados principais, registrar a movimentação no Supabase e responder ao usuário com feedback contextualizado.
 ```
+
+### Testes manuais com Supabase
+
+Antes dos testes, confirme que:
+
+- existe um `app_users` para o Telegram user id usado no teste ou um mapeamento em `SUPABASE_TELEGRAM_USER_KEY_MAP`;
+- existem categorias do usuário para `expense`, `income` e `box_contribution`, ou fallback `Não categorizada`;
+- existe um método de pagamento padrão (`is_default = true`) ou um método chamado `Pix`;
+- o método de pagamento tem `payment_kind`, `kind` ou `type`; se o método se chamar `Pix`, o agent usa `pix` como fallback seguro;
+- para caixinha, existe uma linha em `boxes` com nome compatível com a mensagem.
+
+Despesa:
+
+```txt
+gastei 32 reais com lanche
+```
+
+Confira uma nova linha em `movements` com `kind = expense`, `status = confirmed`, `source = telegram_agent`, `amount_cents = 3200`, `occurred_on` na data do registro e `competence_month` no primeiro dia do mês.
+
+Receita:
+
+```txt
+recebi 500 reais de pagamento
+```
+
+Confira uma nova linha em `movements` com `kind = income`.
+
+Aporte em caixinha:
+
+```txt
+guardei 100 reais para viagem
+```
+
+Confira uma nova linha em `movements` com `kind = box_contribution` e `box_id`, uma linha correspondente em `box_movements` e o incremento em `boxes.current_amount_cents`.
+
+Depois, abra o dashboard e valide se os lançamentos aparecem na competência de `competence_month`.
 
 ---
 
@@ -434,7 +514,8 @@ Esta versão ainda possui limitações importantes:
 - a entrada principal considerada nesta versão é textual;
 - a leitura de imagem de cupom fiscal ainda não faz parte da entrega prática principal;
 - o sistema depende da disponibilidade das APIs externas utilizadas;
-- o Notion é usado como base operacional, não como dashboard financeiro final;
+- o Supabase é a base oficial de movimentações financeiras;
+- o onboarding é mantido em memória durante a sessão do processo; não há persistência de perfil implementada porque este repositório não contém schema ou tabela local confirmada para esses campos;
 - o comando `/devseed` é apenas auxiliar de desenvolvimento.
 
 ---
@@ -446,7 +527,7 @@ Possíveis melhorias futuras:
 - persistir o perfil financeiro completo do usuário;
 - adicionar leitura de cupons fiscais por imagem;
 - melhorar consulta de histórico financeiro;
-- criar dashboards no Notion ou em uma interface própria;
+- evoluir dashboards e consultas sobre a base Supabase;
 - implementar RAG para recuperação contextual mais avançada;
 - adicionar suporte a múltiplos usuários com persistência robusta;
 - melhorar tratamento de erros e logs;

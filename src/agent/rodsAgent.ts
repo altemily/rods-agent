@@ -1,9 +1,9 @@
 import { FinancialTextClassifier } from "./financialTextClassifier";
 import { OnboardingAgent } from "./onboardingAgent";
 import {
-  NotionService,
-  notionService as defaultNotionService,
-} from "../services/notion.service";
+  SupabaseMovementService,
+  supabaseMovementService as defaultSupabaseMovementService,
+} from "../services/supabaseMovement.service";
 import { ContextualRoastGenerator } from "./contextualRoastGenerator";
 import type { FinancialTextClassification } from "./schemas";
 
@@ -16,180 +16,246 @@ type PersistableFinancialClassification = FinancialTextClassification & {
   needsConfirmation: false;
 };
 
+export type RodsAgentResult = {
+  message: string;
+  intent?: FinancialTextClassification["intent"];
+  supabaseAttempted: boolean;
+  supabaseSaved: boolean;
+  onboardingCompleted: boolean;
+  route?: "onboarding" | "financial" | "unknown" | "devseed";
+  error?: string;
+};
+
 export class RodsAgent {
   constructor(
     private readonly onboardingAgent = new OnboardingAgent(),
     private readonly financialTextClassifier = new FinancialTextClassifier(),
-    private readonly notionService: NotionService = defaultNotionService,
+    private readonly supabaseMovementService: SupabaseMovementService = defaultSupabaseMovementService,
     private readonly contextualRoastGenerator = new ContextualRoastGenerator(),
   ) {}
 
-  async respond(chatId: string | number, message: string): Promise<string> {
+  async respond(
+    chatId: string | number,
+    message: string,
+    telegramUserId: string | number | undefined = chatId,
+  ): Promise<string> {
+    const result = await this.respondWithResult(chatId, message, telegramUserId);
+
+    return result.message;
+  }
+
+  async respondWithResult(
+    chatId: string | number,
+    message: string,
+    telegramUserId: string | number | undefined = chatId,
+  ): Promise<RodsAgentResult> {
+    const userStateId = telegramUserId ?? chatId;
     const normalizedMessage = message.trim();
     const command = normalizedMessage.toLowerCase();
+    const onboardingCompleted = this.isOnboardingCompletedForFlow(userStateId);
 
     if (command === "/start") {
-      await this.ensureCompletedProfileLoaded(chatId);
+      const response = this.onboardingAgent.start(userStateId);
 
-      const response = this.onboardingAgent.start(chatId);
-
-      if (!this.onboardingAgent.isCompleted(chatId)) {
-        await this.persistStartedProfile(chatId);
-      }
-
-      return response;
+      return this.toResult(response, {
+        route: "onboarding",
+        onboardingCompleted: this.isOnboardingCompletedForFlow(userStateId),
+      });
     }
 
     if (command === "/reset") {
-      const response = this.onboardingAgent.reset(chatId);
-      await this.persistStartedProfile(chatId);
+      const response = this.onboardingAgent.reset(userStateId);
 
-      return response;
+      return this.toResult(response, {
+        route: "onboarding",
+        onboardingCompleted: false,
+      });
     }
 
     if (command === "/status") {
-      await this.ensureCompletedProfileLoaded(chatId);
-
-      return this.onboardingAgent.getStatus(chatId);
+      return this.toResult(this.onboardingAgent.getStatus(userStateId), {
+        route: "onboarding",
+        onboardingCompleted,
+      });
     }
 
     if (command === "/devseed") {
       if (process.env.ENABLE_DEV_SEED !== "true") {
-        return "Comando de desenvolvimento desativado neste ambiente.";
+        return this.toResult(
+          "Comando de desenvolvimento desativado neste ambiente.",
+          {
+            route: "devseed",
+            onboardingCompleted,
+          },
+        );
       }
 
-      const response = this.onboardingAgent.seedCompletedProfile(chatId);
-      await this.persistCompletedProfile(chatId);
+      const response = this.onboardingAgent.seedCompletedProfile(userStateId);
 
-      return response;
+      return this.toResult(response, {
+        route: "devseed",
+        onboardingCompleted: true,
+      });
     }
 
-    await this.ensureCompletedProfileLoaded(chatId);
-
-    if (!this.onboardingAgent.isCompleted(chatId)) {
+    if (!onboardingCompleted) {
       const response = this.onboardingAgent.handleMessage(
-        chatId,
+        userStateId,
         normalizedMessage,
       );
 
-      if (this.onboardingAgent.isCompleted(chatId)) {
-        await this.persistCompletedProfile(chatId);
-      }
-
-      return response;
+      return this.toResult(response, {
+        route: "onboarding",
+        onboardingCompleted: this.isOnboardingCompletedForFlow(userStateId),
+      });
     }
 
     const result = await this.financialTextClassifier.classify(normalizedMessage);
 
     if (result.status === "not_configured") {
-      return "A classificação por IA ainda não está configurada. Defina GEMINI_API_KEY para ativar essa etapa.";
+      return this.toResult(
+        "A classificação por IA ainda não está configurada. Defina GEMINI_API_KEY para ativar essa etapa.",
+        { route: "financial", onboardingCompleted: true },
+      );
     }
 
     if (result.status === "unknown") {
-      return "Não identifiquei uma movimentação financeira clara. Tente algo como: 'Gastei 42,90 no iFood'.";
+      return this.toResult(
+        "Não identifiquei uma movimentação financeira clara. Tente algo como: 'Gastei 42,90 no iFood'.",
+        { route: "unknown", onboardingCompleted: true },
+      );
     }
 
     if (result.status === "needs_confirmation") {
-      return result.message;
+      return this.toResult(
+        result.message,
+        result.classification
+          ? {
+              intent: result.classification.intent,
+              route: "financial",
+              onboardingCompleted: true,
+            }
+          : { route: "financial", onboardingCompleted: true },
+      );
     }
 
     if (!this.isPersistableClassification(result.classification)) {
-      return this.formatClassificationPreview(result.classification, false);
+      return this.toResult(
+        this.formatClassificationPreview(result.classification, false, "Supabase"),
+        {
+          intent: result.classification.intent,
+          route: "financial",
+          onboardingCompleted: true,
+        },
+      );
     }
 
-    const notionResult = await this.notionService.createMovement({
-      telegramUserId: chatId,
+    const persistenceResult = await this.persistMovement({
+      telegramUserId,
       intent: result.classification.intent,
       amount: result.classification.amount,
       description: result.classification.description,
       category: result.classification.category,
       necessityLevel: result.classification.necessityLevel,
       boxName: result.classification.boxName,
-      source: "TEXT",
+      source: "telegram_agent",
     });
 
-    const profile = this.onboardingAgent.getCompletedProfile(chatId);
+    if (!persistenceResult.success) {
+      const error = persistenceResult.error ?? "Unknown Supabase error";
+
+      return this.toResult(this.formatPersistenceFailure(result.classification), {
+        intent: result.classification.intent,
+        route: "financial",
+        onboardingCompleted: true,
+        supabaseAttempted: true,
+        supabaseSaved: false,
+        error,
+      });
+    }
+
+    const profile = this.onboardingAgent.getCompletedProfile(userStateId);
 
     if (!profile) {
-      return this.formatClassificationPreview(
-        result.classification,
-        notionResult.success,
+      return this.toResult(
+        this.formatClassificationPreview(
+          result.classification,
+          persistenceResult.success,
+          persistenceResult.target,
+        ),
+        {
+          intent: result.classification.intent,
+          route: "financial",
+          onboardingCompleted: true,
+          supabaseAttempted: true,
+          supabaseSaved: persistenceResult.success,
+        },
       );
     }
 
     const contextualRoast = await this.contextualRoastGenerator.generate({
       profile,
       classification: result.classification,
-      notionSaved: notionResult.success,
+      persistenceSaved: persistenceResult.success,
+      persistenceTarget: persistenceResult.target,
     });
 
-    return this.formatFinalResponse(
-      result.classification,
-      notionResult.success,
-      contextualRoast.roast,
+    return this.toResult(
+      this.formatFinalResponse(
+        result.classification,
+        persistenceResult.success,
+        persistenceResult.target,
+        contextualRoast.roast,
+      ),
+      {
+        intent: result.classification.intent,
+        route: "financial",
+        onboardingCompleted: true,
+        supabaseAttempted: true,
+        supabaseSaved: persistenceResult.success,
+      },
     );
   }
 
-  private async ensureCompletedProfileLoaded(
-    chatId: string | number,
-  ): Promise<boolean> {
-    if (this.onboardingAgent.isCompleted(chatId)) {
-      await this.persistCompletedProfile(chatId);
-      return true;
-    }
+  private toResult(
+    message: string,
+    details: Partial<Omit<RodsAgentResult, "message">> = {},
+  ): RodsAgentResult {
+    return {
+      message,
+      supabaseAttempted: false,
+      supabaseSaved: false,
+      onboardingCompleted: false,
+      ...details,
+    };
+  }
 
-    const storedProfile =
-      await this.notionService.findUserProfileByTelegramId(chatId);
-
-    if (!storedProfile || storedProfile.status !== "ONBOARDING_COMPLETED") {
+  private isOnboardingCompletedForFlow(
+    userStateId: string | number | undefined,
+  ): boolean {
+    if (userStateId === undefined) {
       return false;
     }
 
-    return this.onboardingAgent.restoreCompletedProfile(
-      chatId,
-      storedProfile.profile,
-    );
+    if (this.onboardingAgent.isCompleted(userStateId)) {
+      return true;
+    }
+
+    return this.canBypassOnboardingInDevelopment(userStateId);
   }
 
-  private async persistCompletedProfile(chatId: string | number): Promise<void> {
-    const profile = this.onboardingAgent.getCompletedProfile(chatId);
-
-    if (!profile) {
-      return;
+  private canBypassOnboardingInDevelopment(
+    userStateId: string | number | undefined,
+  ): boolean {
+    if (process.env.ENABLE_DEV_SEED !== "true") {
+      return false;
     }
 
-    const result = await this.notionService.saveUserProfile({
-      telegramUserId: chatId,
-      status: "ONBOARDING_COMPLETED",
-      profile,
-    });
-
-    if (!result.success) {
-      console.error(
-        "[RODS][Onboarding] Failed to persist completed profile",
-        result.error,
-      );
+    if (process.env.NODE_ENV === "production") {
+      return false;
     }
-  }
 
-  private async persistStartedProfile(chatId: string | number): Promise<void> {
-    const result = await this.notionService.saveUserProfile({
-      telegramUserId: chatId,
-      status: "ONBOARDING_STARTED",
-      profile: {
-        userId: String(chatId),
-        chatId,
-        status: "ONBOARDING_IN_PROGRESS",
-        updatedAt: new Date().toISOString(),
-      },
-    });
-
-    if (!result.success) {
-      console.error(
-        "[RODS][Onboarding] Failed to persist started profile",
-        result.error,
-      );
-    }
+    return String(userStateId ?? "").trim().length > 0;
   }
 
   private isPersistableClassification(
@@ -203,9 +269,54 @@ export class RodsAgent {
     );
   }
 
+  private async persistMovement(input: {
+    telegramUserId: string | number | undefined;
+    intent: PersistableFinancialClassification["intent"];
+    amount: number;
+    description: string | null;
+    category: string | null;
+    necessityLevel: PersistableFinancialClassification["necessityLevel"];
+    boxName: string | null;
+    source: "telegram_agent";
+  }): Promise<{ success: boolean; target: string; error?: string }> {
+    if (!input.telegramUserId) {
+      const error = "Missing Telegram user id for movement";
+
+      console.error("[RODS][Supabase] Missing Telegram user id for movement");
+
+      return { success: false, target: "Supabase", error };
+    }
+
+    const supabaseResult = await this.supabaseMovementService.createMovement({
+      telegramUserId: input.telegramUserId,
+      intent: input.intent,
+      amount: input.amount,
+      description: input.description,
+      category: input.category,
+      necessityLevel: input.necessityLevel,
+      boxName: input.boxName,
+      source: input.source,
+    });
+
+    if (supabaseResult.success) {
+      return { success: true, target: "Supabase" };
+    }
+
+    const error = supabaseResult.error ?? "Unknown Supabase error";
+
+    console.error("[RODS][Supabase] Failed to persist movement", { error });
+
+    return {
+      success: false,
+      target: "Supabase",
+      error,
+    };
+  }
+
   private formatClassificationPreview(
     classification: FinancialTextClassification,
-    notionSaved: boolean,
+    persistenceSaved: boolean,
+    persistenceTarget: string,
   ): string {
     return [
       "Classificação prévia do RODS:",
@@ -214,21 +325,37 @@ export class RodsAgent {
       `Descrição: ${classification.description ?? "não informada"}`,
       `Categoria: ${classification.category ?? "não informada"}`,
       `Nível: ${this.formatNecessityLevel(classification.necessityLevel)}`,
-      notionSaved
-        ? "Status: registrado no Notion."
-        : "Status: classificação feita, mas o registro no Notion não foi concluído.",
+      persistenceSaved
+        ? `Status: registrado no ${persistenceTarget}.`
+        : `Status: classificação feita, mas o registro no ${persistenceTarget} não foi concluído.`,
+    ].join("\n");
+  }
+
+  private formatPersistenceFailure(
+    classification: PersistableFinancialClassification,
+  ): string {
+    return [
+      "Classifiquei a movimentação, mas não consegui registrar no Supabase.",
+      "Não vou marcar como salva para não bagunçar seu dashboard.",
+      "",
+      `Tipo: ${this.formatIntent(classification.intent)}`,
+      `Valor: ${this.formatAmount(classification.amount)}`,
+      `Categoria: ${classification.category ?? "não informada"}`,
+      "",
+      "Tente novamente em alguns instantes. Se persistir, confira a configuração do usuário, categoria, método de pagamento ou caixinha no Supabase.",
     ].join("\n");
   }
 
   private formatFinalResponse(
     classification: PersistableFinancialClassification,
-    notionSaved: boolean,
+    persistenceSaved: boolean,
+    persistenceTarget: string,
     roast: string,
   ): string {
     return [
-      notionSaved
-        ? "Movimentação registrada no Notion."
-        : "Movimentação classificada, mas o registro no Notion não foi concluído.",
+      persistenceSaved
+        ? `Movimentação registrada no ${persistenceTarget}.`
+        : `Movimentação classificada, mas o registro no ${persistenceTarget} não foi concluído.`,
       "",
       `Tipo: ${this.formatIntent(classification.intent)}`,
       `Valor: ${this.formatAmount(classification.amount)}`,
