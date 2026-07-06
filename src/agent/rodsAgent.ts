@@ -458,7 +458,6 @@ export class RodsAgent {
     roast: string,
   ): string {
     return [
-      "RODS_BUILD_TEST_2026_07_06",
       persistenceSaved
         ? `Movimentação registrada no ${persistenceTarget}.`
         : `Movimentação classificada, mas o registro no ${persistenceTarget} não foi concluído.`,

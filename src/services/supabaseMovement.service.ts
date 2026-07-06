@@ -68,6 +68,34 @@ const intentToKind: Record<MovementIntent, MovementKind> = {
   REGISTER_BOX_CONTRIBUTION: "box_contribution",
 };
 
+const FALLBACK_CATEGORY_NAME = "Não categorizada";
+
+const categoryAliases: Record<string, string> = {
+  technology: "Tecnologia",
+  tech: "Tecnologia",
+  software: "Tecnologia",
+  food: "Alimentação",
+  groceries: "Mercado",
+  market: "Mercado",
+  supermarket: "Mercado",
+  restaurant: "Alimentação",
+  delivery: "Delivery",
+  transport: "Transporte",
+  transportation: "Transporte",
+  uber: "Transporte",
+  health: "Saúde",
+  pharmacy: "Saúde",
+  medicine: "Saúde",
+  education: "Educação",
+  entertainment: "Lazer",
+  shopping: "Compras",
+  income: "Renda",
+  salary: "Salário",
+  freelance: "Freelance",
+  investment: "Investimentos",
+  savings: "Caixinha",
+};
+
 function formatSupabaseError(error: { message?: string } | null): string {
   return error?.message ?? "Unknown Supabase error";
 }
@@ -82,6 +110,20 @@ function toDateOnly(date: Date): string {
 
 function toCompetenceMonth(occurredOn: string): string {
   return `${occurredOn.slice(0, 7)}-01`;
+}
+
+function normalizeLookupText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeCategoryName(categoryName: string | null): string | null {
+  const normalized = categoryName?.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return categoryAliases[normalizeLookupText(normalized)] ?? normalized;
 }
 
 function getPaymentKind(paymentMethod: PaymentMethodRecord): string | null {
@@ -232,7 +274,9 @@ export class SupabaseMovementService {
     if (movementError || !movement) {
       return {
         success: false,
-        error: `Failed to insert movement in Supabase: ${formatSupabaseError(movementError)}`,
+        error: `Failed to insert movement in Supabase: ${formatSupabaseError(
+          movementError,
+        )}`,
       };
     }
 
@@ -263,6 +307,7 @@ export class SupabaseMovementService {
           amountCents,
           balanceWasUpdated: false,
         });
+
         return boxBalanceResult;
       }
     }
@@ -320,7 +365,7 @@ export class SupabaseMovementService {
   }): Promise<
     { success: true; category: LookupRecord } | { success: false; error: string }
   > {
-    const normalizedCategory = input.categoryName?.trim();
+    const normalizedCategory = normalizeCategoryName(input.categoryName);
 
     if (normalizedCategory) {
       const byName = await this.client
@@ -336,21 +381,68 @@ export class SupabaseMovementService {
       }
     }
 
-    const fallback = await this.client
-      ?.from("categories")
-      .select("id,name")
-      .eq("owner_user_id", input.ownerUserId)
-      .eq("kind", input.kind)
-      .ilike("name", "Não categorizada")
-      .maybeSingle<LookupRecord>();
+    const fallbackNames = [
+      FALLBACK_CATEGORY_NAME,
+      "Outros",
+      "Geral",
+      "Sem categoria",
+    ];
 
-    if (fallback?.data) {
-      return { success: true, category: fallback.data };
+    for (const fallbackName of fallbackNames) {
+      const fallback = await this.client
+        ?.from("categories")
+        .select("id,name")
+        .eq("owner_user_id", input.ownerUserId)
+        .eq("kind", input.kind)
+        .ilike("name", fallbackName)
+        .maybeSingle<LookupRecord>();
+
+      if (fallback?.data) {
+        return { success: true, category: fallback.data };
+      }
+    }
+
+    const createdFallback = await this.createFallbackCategory({
+      ownerUserId: input.ownerUserId,
+      kind: input.kind,
+    });
+
+    if (createdFallback.success) {
+      return { success: true, category: createdFallback.category };
     }
 
     return {
       success: false,
-      error: `No category found for kind "${input.kind}". Create "${normalizedCategory ?? "Não categorizada"}" or fallback "Não categorizada" in Supabase.`,
+      error: `No category found for kind "${input.kind}" and fallback category creation failed: ${createdFallback.error}`,
+    };
+  }
+
+  private async createFallbackCategory(input: {
+    ownerUserId: string;
+    kind: MovementKind;
+  }): Promise<
+    { success: true; category: LookupRecord } | { success: false; error: string }
+  > {
+    const { data, error } = await this.client!
+      .from("categories")
+      .insert({
+        owner_user_id: input.ownerUserId,
+        kind: input.kind,
+        name: FALLBACK_CATEGORY_NAME,
+      })
+      .select("id,name")
+      .single<LookupRecord>();
+
+    if (error || !data) {
+      return {
+        success: false,
+        error: formatSupabaseError(error),
+      };
+    }
+
+    return {
+      success: true,
+      category: data,
     };
   }
 
@@ -445,7 +537,9 @@ export class SupabaseMovementService {
       return {
         success: false,
         movementId: input.movementId,
-        error: `Movement was inserted, but box_movements insert failed: ${formatSupabaseError(error)}`,
+        error: `Movement was inserted, but box_movements insert failed: ${formatSupabaseError(
+          error,
+        )}`,
       };
     }
 
@@ -472,7 +566,9 @@ export class SupabaseMovementService {
       return {
         success: false,
         movementId: input.movementId,
-        error: `Movement and box movement were inserted, but boxes.current_amount_cents update failed: ${formatSupabaseError(error)}`,
+        error: `Movement and box movement were inserted, but boxes.current_amount_cents update failed: ${formatSupabaseError(
+          error,
+        )}`,
       };
     }
 
