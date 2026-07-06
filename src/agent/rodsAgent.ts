@@ -5,7 +5,10 @@ import {
   supabaseMovementService as defaultSupabaseMovementService,
 } from "../services/supabaseMovement.service";
 import { ContextualRoastGenerator } from "./contextualRoastGenerator";
-import type { FinancialTextClassification } from "./schemas";
+import type {
+  CompletedOnboardingProfile,
+  FinancialTextClassification,
+} from "./schemas";
 
 type PersistableFinancialClassification = FinancialTextClassification & {
   intent:
@@ -199,24 +202,7 @@ export class RodsAgent {
       });
     }
 
-    const profile = this.onboardingAgent.getCompletedProfile(userStateId);
-
-    if (!profile) {
-      return this.toResult(
-        this.formatClassificationPreview(
-          result.classification,
-          persistenceResult.success,
-          persistenceResult.target,
-        ),
-        {
-          intent: result.classification.intent,
-          route: "financial",
-          onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
-          supabaseAttempted: true,
-          supabaseSaved: persistenceResult.success,
-        },
-      );
-    }
+    const profile = this.getProfileForRoast(userStateId);
 
     const contextualRoast = await this.contextualRoastGenerator.generate({
       profile,
@@ -235,7 +221,7 @@ export class RodsAgent {
       {
         intent: result.classification.intent,
         route: "financial",
-        onboardingCompleted: true,
+        onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
         supabaseAttempted: true,
         supabaseSaved: persistenceResult.success,
       },
@@ -373,6 +359,65 @@ export class RodsAgent {
     };
   }
 
+  private getProfileForRoast(
+    userStateId: string | number,
+  ): CompletedOnboardingProfile {
+    const completedProfile = this.onboardingAgent.getCompletedProfile(userStateId);
+
+    if (completedProfile) {
+      return completedProfile;
+    }
+
+    console.warn(
+      "[RODS][Roast] Completed onboarding profile not found. Using fallback roast profile.",
+      { userStateId: String(userStateId) },
+    );
+
+    return this.buildFallbackRoastProfile(userStateId);
+  }
+
+  private buildFallbackRoastProfile(
+    userStateId: string | number,
+  ): CompletedOnboardingProfile {
+    return {
+      userId: String(userStateId),
+      chatId: userStateId,
+
+      monthlyIncome: process.env.RODS_DEFAULT_MONTHLY_INCOME ?? "não informado",
+      incomeFrequency:
+        process.env.RODS_DEFAULT_INCOME_FREQUENCY ?? "não informado",
+      fixedExpenses: process.env.RODS_DEFAULT_FIXED_EXPENSES ?? "não informado",
+      debts: process.env.RODS_DEFAULT_DEBTS ?? "não informado",
+
+      mainGoal:
+        process.env.RODS_DEFAULT_MAIN_GOAL ?? "organizar a vida financeira",
+      goalAmount: process.env.RODS_DEFAULT_GOAL_AMOUNT ?? "não informado",
+      goalDeadline: process.env.RODS_DEFAULT_GOAL_DEADLINE ?? "não informado",
+
+      weeklyRoutine:
+        process.env.RODS_DEFAULT_WEEKLY_ROUTINE ??
+        "rotina corrida, pouco tempo para revisar gastos no detalhe",
+
+      spendingTriggers:
+        process.env.RODS_DEFAULT_SPENDING_TRIGGERS ??
+        "impulso, cansaço, ansiedade e pequenas compras que parecem inofensivas",
+
+      riskCategories:
+        process.env.RODS_DEFAULT_RISK_CATEGORIES ??
+        "delivery, compras não planejadas, besteirinhas e gastos por impulso",
+
+      boxesAndInvestments:
+        process.env.RODS_DEFAULT_BOXES_AND_INVESTMENTS ?? "não informado",
+
+      roastLevel: process.env.RODS_DEFAULT_ROAST_LEVEL ?? "sem anestesia",
+
+      sensitiveLimits:
+        process.env.RODS_DEFAULT_SENSITIVE_LIMITS ?? "não informado",
+
+      completedAt: new Date().toISOString(),
+    };
+  }
+
   private formatClassificationPreview(
     classification: FinancialTextClassification,
     persistenceSaved: boolean,
@@ -413,6 +458,7 @@ export class RodsAgent {
     roast: string,
   ): string {
     return [
+      "RODS_BUILD_TEST_2026_07_06",
       persistenceSaved
         ? `Movimentação registrada no ${persistenceTarget}.`
         : `Movimentação classificada, mas o registro no ${persistenceTarget} não foi concluído.`,
