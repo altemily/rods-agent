@@ -373,7 +373,7 @@ export class OnboardingAgent {
       `- Tom da cobrança: ${answerFor(state, "roastLevel")}`,
       `- Limites sensíveis: ${answerFor(state, "sensitiveLimits")}`,
       "",
-      "Agora mande uma movimentação financeira para eu classificar, registrar no Notion e comentar com contexto.",
+      "Agora mande uma movimentação financeira para eu classificar, registrar no Supabase e comentar com contexto.",
     ].join("\n");
   }
 }

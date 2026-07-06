@@ -10,7 +10,8 @@ import {
 type ContextualRoastInput = {
   profile: CompletedOnboardingProfile;
   classification: FinancialTextClassification;
-  notionSaved: boolean;
+  persistenceSaved: boolean;
+  persistenceTarget: string;
 };
 
 type RoastTone = ContextualRoast["tone"];
@@ -193,15 +194,15 @@ export class ContextualRoastGenerator {
     );
 
     const amount = this.formatAmount(input.classification.amount);
-    const notionStatus = this.formatNotionStatus(input.notionSaved);
-    const incidentStatus = this.formatIncidentStatus(input.notionSaved);
+    const persistenceStatus = this.formatPersistenceStatus(input);
+    const incidentStatus = this.formatIncidentStatus(input);
 
     if (input.classification.intent === "REGISTER_INCOME") {
-      return `Entrada de ${amount} ${notionStatus}. Boa: renda entrando combina com ${goal}. Agora a parte provocativa é simples: fazer esse dinheiro trabalhar pela meta, em vez de só assistir ele virar lembrança no extrato.`;
+      return `Entrada de ${amount} ${persistenceStatus}. Boa: renda entrando combina com ${goal}. Agora a parte provocativa é simples: fazer esse dinheiro trabalhar pela meta, em vez de só assistir ele virar lembrança no extrato.`;
     }
 
     if (input.classification.intent === "REGISTER_BOX_CONTRIBUTION") {
-      return `Contribuição de ${amount} ${notionStatus}. Isso conversa bem com sua meta de ${goal}${
+      return `Contribuição de ${amount} ${persistenceStatus}. Isso conversa bem com sua meta de ${goal}${
         goalAmount !== "não informado" ? ` (${goalAmount})` : ""
       }${
         goalDeadline !== "não informado" ? ` no prazo de ${goalDeadline}` : ""
@@ -209,11 +210,11 @@ export class ContextualRoastGenerator {
     }
 
     if (input.classification.necessityLevel === "ESSENTIAL") {
-      return `Despesa essencial de ${amount} em ${category} ${notionStatus}. Aqui não cabe teatro de culpa: gasto básico precisa existir. O ponto útil é acompanhar se ele está cabendo junto das despesas fixas e da sua meta de ${goal}.`;
+      return `Despesa essencial de ${amount} em ${category} ${persistenceStatus}. Aqui não cabe teatro de culpa: gasto básico precisa existir. O ponto útil é acompanhar se ele está cabendo junto das despesas fixas e da sua meta de ${goal}.`;
     }
 
     if (input.classification.necessityLevel === "NECESSARY") {
-      return `Despesa necessária de ${amount} em ${category} ${notionStatus}. Não é vilã, mas também não merece cheque em branco. Como você citou ${riskCategories}, vale olhar se esse gasto está ajudando sua rotina ou só passando fantasiado de prioridade.`;
+      return `Despesa necessária de ${amount} em ${category} ${persistenceStatus}. Não é vilã, mas também não merece cheque em branco. Como você citou ${riskCategories}, vale olhar se esse gasto está ajudando sua rotina ou só passando fantasiado de prioridade.`;
     }
 
     if (tone === "NO_ANESTHESIA") {
@@ -221,19 +222,19 @@ export class ContextualRoastGenerator {
         [
           `Amiga, esse gasto de ${amount} em ${category} foi uma vergonha financeira ${incidentStatus}. Você disse que ${triggers} mexem com seu bolso e que quer ${goal}; então vamos combinar que esse dinheiro não estava exatamente fazendo estágio obrigatório na sua meta.`,
 
-          `Modo Boleto Vencido ativado: ${amount} em ${category} ${notionStatus}. Não vou dramatizar, mas isso tem energia de “eu mereço” seguido de arrependimento no extrato.`,
+          `Modo Boleto Vencido ativado: ${amount} em ${category} ${persistenceStatus}. Não vou dramatizar, mas isso tem energia de “eu mereço” seguido de arrependimento no extrato.`,
 
           `Amiga, o RODS viu ${amount} em ${category} e precisou respirar em silêncio por 3 segundos ${incidentStatus}. Sua meta de ${goal} estava ali, parada, assistindo esse gasto passar como quem vê o vilão entrando no segundo ato.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Você quer ${goal}, mas esse gasto veio com a mesma energia de quem abre o app do banco e fala “depois eu vejo”. Spoiler: depois dói.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Você quer ${goal}, mas esse gasto veio com a mesma energia de quem abre o app do banco e fala “depois eu vejo”. Spoiler: depois dói.`,
 
           `RODS registrou ${amount} em ${category} e abriu um processo administrativo contra seu autocontrole. Você disse que ${triggers} mexem com seu bolso; esse gasto claramente usou essa informação contra você.`,
 
           `Amiga, esse gasto de ${amount} em ${category} não derruba sua vida financeira sozinho, mas também não veio para somar. Ele entrou no orçamento como figurante caro e ainda quis sentar na janela.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Se sua meta é ${goal}, esse gasto precisa se explicar melhor, porque no momento ele está com cara de “foi só dessa vez” número 47.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Se sua meta é ${goal}, esse gasto precisa se explicar melhor, porque no momento ele está com cara de “foi só dessa vez” número 47.`,
 
-          `Modo Boleto Vencido informa: ${amount} em ${category} ${notionStatus}. Não estou dizendo que foi o fim do mundo, mas o seu orçamento certamente pediu para conversar em particular.`,
+          `Modo Boleto Vencido informa: ${amount} em ${category} ${persistenceStatus}. Não estou dizendo que foi o fim do mundo, mas o seu orçamento certamente pediu para conversar em particular.`,
         ],
         input,
       );
@@ -242,15 +243,15 @@ export class ContextualRoastGenerator {
     if (tone === "CONTROLLED") {
       return this.pickFallbackMessage(
         [
-          `Despesa de ${amount} em ${category} ${notionStatus}. Considerando seus gatilhos (${triggers}) e sua meta de ${goal}, isso tem cara de decisão que pede recibo e um pouco de vergonha operacional, no bom sentido.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Considerando seus gatilhos (${triggers}) e sua meta de ${goal}, isso tem cara de decisão que pede recibo e um pouco de vergonha operacional, no bom sentido.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Não é caso de sirene financeira, mas também não merece aplauso em pé. Vale conferir se isso ajuda sua rotina ou só alimenta ${riskCategories}.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Não é caso de sirene financeira, mas também não merece aplauso em pé. Vale conferir se isso ajuda sua rotina ou só alimenta ${riskCategories}.`,
 
-          `Gasto de ${amount} em ${category} ${notionStatus}. O orçamento não gritou, mas levantou uma sobrancelha. Se isso virar padrão, sua meta de ${goal} vai começar a mandar indireta.`,
+          `Gasto de ${amount} em ${category} ${persistenceStatus}. O orçamento não gritou, mas levantou uma sobrancelha. Se isso virar padrão, sua meta de ${goal} vai começar a mandar indireta.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Sozinha, talvez passe. Repetida, vira personagem fixo no drama do extrato. Observa esse comportamento antes que ele ganhe temporada nova.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Sozinha, talvez passe. Repetida, vira personagem fixo no drama do extrato. Observa esse comportamento antes que ele ganhe temporada nova.`,
 
-          `Gasto de ${amount} em ${category} ${notionStatus}. Não vou te julgar com violência, mas o RODS oficialmente colocou esse movimento em observação preventiva.`,
+          `Gasto de ${amount} em ${category} ${persistenceStatus}. Não vou te julgar com violência, mas o RODS oficialmente colocou esse movimento em observação preventiva.`,
         ],
         input,
       );
@@ -259,15 +260,15 @@ export class ContextualRoastGenerator {
     if (tone === "DIRECT") {
       return this.pickFallbackMessage(
         [
-          `Despesa de ${amount} em ${category} ${notionStatus}. Ela precisa conversar com sua meta de ${goal}; se virou padrão dentro de ${riskCategories}, o orçamento já está pedindo mais critério.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Ela precisa conversar com sua meta de ${goal}; se virou padrão dentro de ${riskCategories}, o orçamento já está pedindo mais critério.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Direto ao ponto: esse gasto precisa justificar o espaço que está ocupando entre você e ${goal}.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Direto ao ponto: esse gasto precisa justificar o espaço que está ocupando entre você e ${goal}.`,
 
-          `Gasto de ${amount} em ${category} ${notionStatus}. Se isso resolve algo real, ok. Se foi só impulso fantasiado de necessidade, já temos um suspeito no extrato.`,
+          `Gasto de ${amount} em ${category} ${persistenceStatus}. Se isso resolve algo real, ok. Se foi só impulso fantasiado de necessidade, já temos um suspeito no extrato.`,
 
-          `Despesa de ${amount} em ${category} ${notionStatus}. Seu dinheiro tem meta, prazo e destino. Esse gasto precisa provar que não foi só um desvio turístico no orçamento.`,
+          `Despesa de ${amount} em ${category} ${persistenceStatus}. Seu dinheiro tem meta, prazo e destino. Esse gasto precisa provar que não foi só um desvio turístico no orçamento.`,
 
-          `Gasto de ${amount} em ${category} ${notionStatus}. Se ele conversa com sua rotina, seguimos. Se conversa só com ${triggers}, aí o orçamento acabou de pedir uma reunião.`,
+          `Gasto de ${amount} em ${category} ${persistenceStatus}. Se ele conversa com sua rotina, seguimos. Se conversa só com ${triggers}, aí o orçamento acabou de pedir uma reunião.`,
         ],
         input,
       );
@@ -275,13 +276,13 @@ export class ContextualRoastGenerator {
 
     return this.pickFallbackMessage(
       [
-        `Despesa de ${amount} em ${category} ${notionStatus}. Vale observar se esse gasto combina com sua meta de ${goal} e com os gatilhos que você mesmo apontou: ${triggers}.`,
+        `Despesa de ${amount} em ${category} ${persistenceStatus}. Vale observar se esse gasto combina com sua meta de ${goal} e com os gatilhos que você mesmo apontou: ${triggers}.`,
 
-        `Gasto de ${amount} em ${category} ${notionStatus}. Sem drama por enquanto: só registra, observa e vê se isso está ajudando ou atrapalhando sua meta de ${goal}.`,
+        `Gasto de ${amount} em ${category} ${persistenceStatus}. Sem drama por enquanto: só registra, observa e vê se isso está ajudando ou atrapalhando sua meta de ${goal}.`,
 
-        `Despesa de ${amount} em ${category} ${notionStatus}. Pequeno ou grande, todo gasto conta uma história. Esse aqui precisa combinar com o plano, não só com o momento.`,
+        `Despesa de ${amount} em ${category} ${persistenceStatus}. Pequeno ou grande, todo gasto conta uma história. Esse aqui precisa combinar com o plano, não só com o momento.`,
 
-        `Gasto de ${amount} em ${category} ${notionStatus}. Fica o lembrete gentil do RODS: dinheiro que sai sem critério costuma fazer falta quando a meta chama pelo nome.`,
+        `Gasto de ${amount} em ${category} ${persistenceStatus}. Fica o lembrete gentil do RODS: dinheiro que sai sem critério costuma fazer falta quando a meta chama pelo nome.`,
       ],
       input,
     );
@@ -322,16 +323,16 @@ export class ContextualRoastGenerator {
     return hash;
   }
 
-  private formatNotionStatus(notionSaved: boolean): string {
-    return notionSaved
-      ? "registrada no Notion"
-      : "classificada, mas ainda sem registro concluído no Notion";
+  private formatPersistenceStatus(input: ContextualRoastInput): string {
+    return input.persistenceSaved
+      ? `registrada no ${input.persistenceTarget}`
+      : `classificada, mas ainda sem registro concluído no ${input.persistenceTarget}`;
   }
 
-  private formatIncidentStatus(notionSaved: boolean): string {
-    return notionSaved
-      ? "e já ficou registrada no Notion, para não fingir que nada aconteceu"
-      : "mas ainda não consegui concluir o registro no Notion";
+  private formatIncidentStatus(input: ContextualRoastInput): string {
+    return input.persistenceSaved
+      ? `e já ficou registrada no ${input.persistenceTarget}, para não fingir que nada aconteceu`
+      : `mas ainda não consegui concluir o registro no ${input.persistenceTarget}`;
   }
 
   private formatAmount(amount: number | null): string {

@@ -46,7 +46,7 @@ function looksSensitive(text: string): boolean {
   const normalized = text.toLowerCase();
 
   return (
-    /\b(api[_-]?key|token|secret|password|authorization|bearer|x-goog|telegram|notion|gemini)\b/i.test(normalized) ||
+    /\b(api[_-]?key|token|secret|password|authorization|bearer|x-goog|telegram|gemini)\b/i.test(normalized) ||
     /\b[A-Za-z0-9_-]{32,}\b/.test(text) ||
     /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(text)
   );
