@@ -53,6 +53,8 @@ export class RodsAgent {
     const normalizedMessage = message.trim();
     const command = normalizedMessage.toLowerCase();
     const onboardingCompleted = this.isOnboardingCompletedForFlow(userStateId);
+    const canUseSupabaseFinancialFlow =
+      this.canUseSupabaseFinancialFlow(telegramUserId);
 
     if (command === "/start") {
       const response = this.onboardingAgent.start(userStateId);
@@ -98,7 +100,7 @@ export class RodsAgent {
       });
     }
 
-    if (!onboardingCompleted) {
+    if (!onboardingCompleted && !canUseSupabaseFinancialFlow) {
       const response = this.onboardingAgent.handleMessage(
         userStateId,
         normalizedMessage,
@@ -115,14 +117,32 @@ export class RodsAgent {
     if (result.status === "not_configured") {
       return this.toResult(
         "A classificação por IA ainda não está configurada. Defina GEMINI_API_KEY para ativar essa etapa.",
-        { route: "financial", onboardingCompleted: true },
+        {
+          route: "financial",
+          onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
+        },
       );
     }
 
     if (result.status === "unknown") {
+      if (!onboardingCompleted && !canUseSupabaseFinancialFlow) {
+        const response = this.onboardingAgent.handleMessage(
+          userStateId,
+          normalizedMessage,
+        );
+
+        return this.toResult(response, {
+          route: "onboarding",
+          onboardingCompleted: this.isOnboardingCompletedForFlow(userStateId),
+        });
+      }
+
       return this.toResult(
         "Não identifiquei uma movimentação financeira clara. Tente algo como: 'Gastei 42,90 no iFood'.",
-        { route: "unknown", onboardingCompleted: true },
+        {
+          route: "unknown",
+          onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
+        },
       );
     }
 
@@ -133,9 +153,14 @@ export class RodsAgent {
           ? {
               intent: result.classification.intent,
               route: "financial",
-              onboardingCompleted: true,
+              onboardingCompleted:
+                onboardingCompleted || canUseSupabaseFinancialFlow,
             }
-          : { route: "financial", onboardingCompleted: true },
+          : {
+              route: "financial",
+              onboardingCompleted:
+                onboardingCompleted || canUseSupabaseFinancialFlow,
+            },
       );
     }
 
@@ -145,7 +170,7 @@ export class RodsAgent {
         {
           intent: result.classification.intent,
           route: "financial",
-          onboardingCompleted: true,
+          onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
         },
       );
     }
@@ -167,7 +192,7 @@ export class RodsAgent {
       return this.toResult(this.formatPersistenceFailure(result.classification), {
         intent: result.classification.intent,
         route: "financial",
-        onboardingCompleted: true,
+        onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
         supabaseAttempted: true,
         supabaseSaved: false,
         error,
@@ -186,7 +211,7 @@ export class RodsAgent {
         {
           intent: result.classification.intent,
           route: "financial",
-          onboardingCompleted: true,
+          onboardingCompleted: onboardingCompleted || canUseSupabaseFinancialFlow,
           supabaseAttempted: true,
           supabaseSaved: persistenceResult.success,
         },
@@ -256,6 +281,41 @@ export class RodsAgent {
     }
 
     return String(userStateId ?? "").trim().length > 0;
+  }
+
+  private canUseSupabaseFinancialFlow(
+    telegramUserId: string | number | undefined,
+  ): boolean {
+    if (!telegramUserId) {
+      return false;
+    }
+
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return false;
+    }
+
+    const normalizedTelegramUserId = String(telegramUserId).trim();
+
+    if (!normalizedTelegramUserId) {
+      return false;
+    }
+
+    const allowedUserIds = this.parseCommaSeparatedEnv(
+      process.env.TELEGRAM_ALLOWED_USER_IDS,
+    );
+
+    if (allowedUserIds.length > 0) {
+      return allowedUserIds.includes(normalizedTelegramUserId);
+    }
+
+    return Boolean(process.env.SUPABASE_TELEGRAM_USER_KEY_MAP?.trim());
+  }
+
+  private parseCommaSeparatedEnv(rawValue: string | undefined): string[] {
+    return (rawValue ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
   private isPersistableClassification(
